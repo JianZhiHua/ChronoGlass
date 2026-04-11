@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import winsound
+from enum import IntEnum
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
@@ -545,10 +546,17 @@ class AlarmTriggerDialog(QDialog):
     def do_done(self): self.action = "done"; self.accept()
 
 
+class AppMode(IntEnum):
+    CLOCK = 0
+    COUNTDOWN = 1
+    STOPWATCH = 2
+    ALARM = 3
+
+
 class ChronoGlass(QWidget):
     def __init__(self):
         super().__init__()
-        self.mode = 0
+        self.mode = AppMode.CLOCK
         self.is_running = False
         self.default_seconds = 1200
         self.remaining_seconds = self.default_seconds
@@ -595,13 +603,21 @@ class ChronoGlass(QWidget):
         self.mode_btn.setFixedSize(32, 28)
         self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.mode_btn.clicked.connect(lambda: self.switch_mode((self.mode + 1) % 4))
+        self.mode_btn.setStyleSheet("""
+            QPushButton { color: #a3be8c; background: rgba(216, 222, 233, 15); border: none; border-bottom: 2px solid #a3be8c; font-size: 16px; font-weight: bold; }
+            QPushButton:hover { background: rgba(216, 222, 233, 30); color: #eceff4; border-bottom: 3px solid #eceff4; }
+        """)
+        self.mode_btn.clicked.connect(lambda: self.switch_mode((self.mode + 1) % len(AppMode)))
         top_bar.addWidget(self.mode_btn)
 
         self.min_btn = QPushButton("—")
         self.min_btn.setFixedSize(32, 28)
         self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.min_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.min_btn.setStyleSheet("""
+            QPushButton { color: #88c0d0; background: rgba(216, 222, 233, 15); border: none; border-bottom: 2px solid #88c0d0; font-size: 16px; font-weight: bold; }
+            QPushButton:hover { background: rgba(216, 222, 233, 30); color: #eceff4; border-bottom: 3px solid #eceff4; }
+        """)
         self.min_btn.clicked.connect(self.hide)
         top_bar.addWidget(self.min_btn)
 
@@ -641,13 +657,13 @@ class ChronoGlass(QWidget):
         """)
 
         m0_act = QAction("🕒 系统时钟", self)
-        m0_act.triggered.connect(lambda: self.switch_mode(0))
+        m0_act.triggered.connect(lambda: self.switch_mode(AppMode.CLOCK))
         m1_act = QAction("⏳ 倒计时模式", self)
-        m1_act.triggered.connect(lambda: self.switch_mode(1))
+        m1_act.triggered.connect(lambda: self.switch_mode(AppMode.COUNTDOWN))
         m2_act = QAction("⏱️ 秒表计时", self)
-        m2_act.triggered.connect(lambda: self.switch_mode(2))
+        m2_act.triggered.connect(lambda: self.switch_mode(AppMode.STOPWATCH))
         m3_act = QAction("⏰ 闹钟", self)
-        m3_act.triggered.connect(lambda: self.switch_mode(3))
+        m3_act.triggered.connect(lambda: self.switch_mode(AppMode.ALARM))
         reset_act = QAction("🔄 重置当前计时", self)
         reset_act.triggered.connect(self.reset_timer)
         settings_act = QAction("⚙️ 闹钟设置", self)
@@ -684,13 +700,6 @@ class ChronoGlass(QWidget):
         self.mode_label.setStyleSheet(f"color: {color}; background: transparent;")
         self.mode_label.setText(mode_text)
 
-        btn_style = f"""
-            QPushButton {{ color: {color}; background: rgba(216, 222, 233, 15); border: none; border-bottom: 2px solid {color}; font-size: 16px; font-weight: bold; }}
-            QPushButton:hover {{ background: rgba(216, 222, 233, 30); color: #eceff4; border-bottom: 3px solid #eceff4; }}
-        """
-        self.mode_btn.setStyleSheet(btn_style)
-        self.min_btn.setStyleSheet(btn_style)
-
         self.close_btn.setStyleSheet(f"""
             QPushButton {{ color: #bf616a; background: rgba(191, 97, 106, 15); border: none; border-bottom: 2px solid #bf616a; font-size: 18px; font-weight: bold; }}
             QPushButton:hover {{ background: rgba(191, 97, 106, 40); color: #d8dee9; border-bottom: 3px solid #d8dee9; }}
@@ -699,12 +708,12 @@ class ChronoGlass(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.mode == 1:
+            if self.mode == AppMode.COUNTDOWN:
                 self.set_custom_time()
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event):
-        if self.mode == 1:
+        if self.mode == AppMode.COUNTDOWN:
             step = 60 if event.angleDelta().y() > 0 else -60
             if self.default_seconds + step >= 60:
                 self.default_seconds += step
@@ -729,7 +738,7 @@ class ChronoGlass(QWidget):
         dlg.exec()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Space and self.mode != 0:
+        if event.key() == Qt.Key.Key_Space and self.mode != AppMode.CLOCK:
             self.is_running = not self.is_running
             self.refresh_display()
         else:
@@ -747,12 +756,16 @@ class ChronoGlass(QWidget):
 
     def tick(self):
         if self.is_running:
-            if self.mode == 1:
+            if self.mode == AppMode.COUNTDOWN:
                 if self.remaining_seconds > 0:
                     self.remaining_seconds -= 1
                 else:
                     self.is_running = False
-            elif self.mode == 2:
+                    try:
+                        winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                    except Exception:
+                        pass
+            elif self.mode == AppMode.STOPWATCH:
                 self.elapsed_seconds += 1
 
         if self.alarms:
@@ -761,8 +774,7 @@ class ChronoGlass(QWidget):
             for i, alarm in enumerate(self.alarms):
                 # 触发逻辑：只要未过期且时间对得上
                 if alarm["enabled"]:
-                    if now.hour() == alarm["time"].hour() and now.minute() == alarm["time"].minute() and now.second() == \
-                            alarm["time"].second():
+                    if now.secsTo(alarm["time"]) == 0:
                         trigger_happened = True
                         try:
                             winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
@@ -796,11 +808,11 @@ class ChronoGlass(QWidget):
         self.refresh_display()
 
     def refresh_display(self):
-        if self.mode == 0:
+        if self.mode == AppMode.CLOCK:
             self.label.setText(QTime.currentTime().toString("HH:mm:ss"))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             self.update_style("#88c0d0", "系统时钟")
-        elif self.mode == 1:
+        elif self.mode == AppMode.COUNTDOWN:
             self.label.setText(self.format_time(self.remaining_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             if self.remaining_seconds == 0:
@@ -809,14 +821,14 @@ class ChronoGlass(QWidget):
                 self.update_style("#ebcb8b", "倒计时进行中")
             else:
                 self.update_style("#a3be8c", "倒计时已暂停")
-        elif self.mode == 2:
+        elif self.mode == AppMode.STOPWATCH:
             self.label.setText(self.format_time(self.elapsed_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             if self.is_running:
                 self.update_style("#b48ead", "正在计时")
             else:
                 self.update_style("#d8dee9", "计时已暂停")
-        elif self.mode == 3:
+        elif self.mode == AppMode.ALARM:
             self.label.setFont(QFont("Microsoft YaHei", 24, QFont.Weight.Bold))
             count = len(self.alarms)
             enabled_count = sum(1 for a in self.alarms if a["enabled"])
@@ -834,9 +846,9 @@ class ChronoGlass(QWidget):
         self.refresh_display()
 
     def reset_timer(self):
-        if self.mode == 1:
+        if self.mode == AppMode.COUNTDOWN:
             self.remaining_seconds = self.default_seconds
-        elif self.mode == 2:
+        elif self.mode == AppMode.STOPWATCH:
             self.elapsed_seconds = 0
         self.is_running = False
         self.refresh_display()
