@@ -5,7 +5,7 @@ import winsound
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-                             QSpinBox, QLineEdit, QFormLayout, QComboBox,QAbstractSpinBox)
+                             QSpinBox, QLineEdit, QFormLayout, QComboBox)
 from PyQt6.QtCore import QTimer, QTime, Qt, QPoint, QDateTime, pyqtSignal, QPropertyAnimation, pyqtProperty, \
     QEasingCurve
 from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush, QPen
@@ -23,17 +23,12 @@ def resource_path(relative_path):
 
 
 # --- 本地持久化工具函数 ---
-# --- 本地持久化工具函数 ---
 def get_data_file_path():
     """获取闹钟数据文件的存储路径（强制保存在真正的 exe 同级目录）"""
-    # 兼容 Nuitka 和 PyInstaller 的真实路径获取
     if getattr(sys, 'frozen', False) or "__compiled__" in globals():
-        # 获取打包后可执行文件的真实所在目录，而不是临时解压目录
         base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
     else:
-        # 源码运行时的目录
         base_path = os.path.dirname(os.path.abspath(__file__))
-
     return os.path.join(base_path, 'alarms.json')
 
 
@@ -50,8 +45,8 @@ def load_alarms():
                     alarms.append({
                         "time": t,
                         "name": d.get("name", "新闹钟"),
-                        "enabled": d.get("enabled", True),
-                        "triggered": d.get("triggered", False)
+                        "enabled": d.get("enabled", True)
+                        # 我们移除了对 triggered 字段的依赖
                     })
         except Exception:
             pass
@@ -66,18 +61,15 @@ def save_alarms(alarms):
             data.append({
                 "time": a["time"].toString("HH:mm:ss"),
                 "name": a["name"],
-                "enabled": a["enabled"],
-                "triggered": a["triggered"]
+                "enabled": a["enabled"]
             })
-        # 写入数据
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        # 如果出现权限问题（例如放在了 C 盘只读目录下），可以在控制台看到报错
         print(f"数据保存失败: {e}")
 
 
-# --- 自定义原生平滑开关控件 (解决状态栏按钮渲染问题) ---
+# --- 自定义原生平滑开关控件 ---
 class ToggleSwitch(QWidget):
     toggled = pyqtSignal(bool)
 
@@ -123,15 +115,11 @@ class ToggleSwitch(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
-
-        # 背景颜色：暗夜主题的活跃蓝(#88c0d0) 和 失效灰(#4c566a)
         bg_color = QColor("#88c0d0") if self._checked else QColor("#4c566a")
         painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, rect.width(), rect.height(), 11, 11)
-
-        # 圆形滑块
-        painter.setBrush(QBrush(QColor("#eceff4")))  # 白色滑块
+        painter.setBrush(QBrush(QColor("#eceff4")))
         painter.drawEllipse(self._position, 2, 18, 18)
         painter.end()
 
@@ -150,51 +138,35 @@ class CustomSpinBox(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 1. 隐藏自带按钮的输入框
         self.spin = QSpinBox()
         self.spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.spin.setFixedSize(55, 30)  # 留 25px 给右边的按钮
+        self.spin.setFixedSize(55, 30)
         self.spin.setStyleSheet("""
             QSpinBox {
-                background-color: #3b4252;
-                border: 1px solid #4c566a;
-                border-right: none; /* 右侧开口，为了和按钮拼接 */
-                border-top-left-radius: 4px;
-                border-bottom-left-radius: 4px;
-                border-top-right-radius: 0px;
-                border-bottom-right-radius: 0px;
-                padding: 5px;
-                color: #eceff4;
+                background-color: #3b4252; border: 1px solid #4c566a; border-right: none;
+                border-top-left-radius: 4px; border-bottom-left-radius: 4px;
+                padding: 5px; color: #eceff4;
             }
         """)
 
-        # 2. 右侧按钮布局
         btn_layout = QVBoxLayout()
         btn_layout.setSpacing(0)
 
-        # 按钮通用样式
         btn_style = """
             QPushButton {
-                background-color: #2e3440;
-                border: 1px solid #4c566a;
-                color: #eceff4;
-                font-family: 'Consolas', 'Microsoft YaHei';
-                font-weight: bold;
-                font-size: 14px;
-                padding: 0px;
+                background-color: #3b4252; border: 1px solid #4c566a; color: #eceff4;
+                font-family: 'Consolas', 'Microsoft YaHei'; font-weight: bold; font-size: 14px; padding: 0px;
             }
             QPushButton:hover { background-color: #434c5e; }
             QPushButton:pressed { background-color: #2e3440; }
         """
 
-        # 加号按钮
         self.btn_up = QPushButton("+")
         self.btn_up.setFixedSize(25, 15)
         self.btn_up.setStyleSheet(btn_style + "border-top-right-radius: 4px; border-bottom: none;")
         self.btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_up.clicked.connect(self.spin.stepUp)
 
-        # 减号按钮
         self.btn_down = QPushButton("-")
         self.btn_down.setFixedSize(25, 15)
         self.btn_down.setStyleSheet(btn_style + "border-bottom-right-radius: 4px;")
@@ -207,7 +179,6 @@ class CustomSpinBox(QWidget):
         layout.addWidget(self.spin)
         layout.addLayout(btn_layout)
 
-    # 代理 QSpinBox 的常用方法，让外部调用完全无感知
     def value(self): return self.spin.value()
 
     def setValue(self, v): self.spin.setValue(v)
@@ -216,21 +187,20 @@ class CustomSpinBox(QWidget):
 
 
 def alarm_remaining_text(alarm):
-    """计算闹钟剩余时间文本"""
+    """计算闹钟剩余时间文本 - 【核心改动：基于时间对比】"""
     if not alarm["enabled"]:
         return "已停用"
-    if alarm.get("triggered", False):
-        return "已过期"
 
     now = QTime.currentTime()
     target = alarm["time"]
 
+    # 判断是否过期：如果当前时间大于设定的闹钟时间，直接判定为过期
+    if now > target:
+        return "已过期"
+
     now_sec = now.hour() * 3600 + now.minute() * 60 + now.second()
     target_sec = target.hour() * 3600 + target.minute() * 60 + target.second()
-
     diff = target_sec - now_sec
-    if diff < 0:
-        diff += 24 * 3600
 
     hours, rem = divmod(diff, 3600)
     minutes, seconds = divmod(rem, 60)
@@ -244,7 +214,7 @@ def alarm_remaining_text(alarm):
 
 
 class AlarmEditDialog(QDialog):
-    """单个闹钟编辑对话框 — 在一个页面内完成时分秒和名称的输入"""
+    """单个闹钟编辑对话框"""
 
     def __init__(self, hour=0, minute=0, second=0, name="新闹钟", title="添加闹钟", parent=None):
         super().__init__(parent)
@@ -260,7 +230,6 @@ class AlarmEditDialog(QDialog):
         form.setSpacing(10)
         form.setContentsMargins(0, 0, 0, 10)
 
-        # 直接使用我们刚才封装的绝对不会丢图的 CustomSpinBox
         self.spin_h = CustomSpinBox()
         self.spin_h.setRange(0, 23)
         self.spin_h.setValue(hour)
@@ -283,7 +252,8 @@ class AlarmEditDialog(QDialog):
 
         self.name_edit = QLineEdit()
         self.name_edit.setText(name)
-        self.name_edit.setStyleSheet("QLineEdit { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }")
+        self.name_edit.setStyleSheet(
+            "QLineEdit { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }")
         form.addRow("标签", self.name_edit)
 
         layout.addLayout(form)
@@ -293,12 +263,14 @@ class AlarmEditDialog(QDialog):
 
         cancel_btn = QPushButton("取消")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet("QPushButton { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 6px; padding: 6px 18px; color: #d8dee9; } QPushButton:hover { background-color: #4c566a; }")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 6px; padding: 6px 18px; color: #d8dee9; } QPushButton:hover { background-color: #4c566a; }")
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("确定")
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        ok_btn.setStyleSheet("QPushButton { background-color: #88c0d0; color: #2e3440; border-radius: 6px; padding: 6px 18px; font-weight: bold; } QPushButton:hover { background-color: #8fbcbb; }")
+        ok_btn.setStyleSheet(
+            "QPushButton { background-color: #88c0d0; color: #2e3440; border-radius: 6px; padding: 6px 18px; font-weight: bold; } QPushButton:hover { background-color: #8fbcbb; }")
         ok_btn.clicked.connect(self.accept)
 
         btn_layout.addWidget(cancel_btn)
@@ -314,8 +286,9 @@ class AlarmEditDialog(QDialog):
     def get_name(self):
         return self.name_edit.text().strip() or "新闹钟"
 
+
 class AlarmSettingsDialog(QDialog):
-    """闹钟设置界面 (暗黑主题)"""
+    """闹钟设置界面"""
 
     def __init__(self, alarms, parent=None):
         super().__init__(parent)
@@ -335,7 +308,6 @@ class AlarmSettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(15, 15, 15, 15)
 
-        # 按钮区
         btn_layout = QHBoxLayout()
         add_btn = QPushButton("➕ 添加闹钟")
         del_btn = QPushButton("➖ 删除选中")
@@ -354,7 +326,6 @@ class AlarmSettingsDialog(QDialog):
         edit_btn.clicked.connect(self.edit_alarm)
         layout.addLayout(btn_layout)
 
-        # 闹钟列表表格 (暗夜主题风格配置)
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["时间", "闹钟标签", "剩余", "状态"])
@@ -387,7 +358,6 @@ class AlarmSettingsDialog(QDialog):
         self.refresh_table()
         layout.addWidget(self.table)
 
-        # 底部按钮
         bottom_layout = QHBoxLayout()
         bottom_layout.addStretch()
 
@@ -403,6 +373,8 @@ class AlarmSettingsDialog(QDialog):
 
     def refresh_table(self):
         self.table.setRowCount(len(self.alarms))
+        now = QTime.currentTime()
+
         for i, alarm in enumerate(self.alarms):
             time_str = alarm["time"].toString("HH:mm:ss")
             time_item = QTableWidgetItem(time_str)
@@ -415,12 +387,13 @@ class AlarmSettingsDialog(QDialog):
             remaining = alarm_remaining_text(alarm)
             rem_item = QTableWidgetItem(remaining)
             rem_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # 过期标红
-            if alarm.get("triggered", False):
+
+            # 【核心改动】实时判断是否过期并标红
+            is_expired = now > alarm["time"]
+            if is_expired:
                 rem_item.setForeground(QColor("#bf616a"))
             self.table.setItem(i, 2, rem_item)
 
-            # 使用自定义原生 Switch 控件
             chk = ToggleSwitch(checked=alarm["enabled"])
             chk.toggled.connect(lambda checked, idx=i: self.toggle_alarm(idx, checked))
 
@@ -431,22 +404,26 @@ class AlarmSettingsDialog(QDialog):
             chk_layout.setContentsMargins(0, 0, 0, 0)
             self.table.setCellWidget(i, 3, cell_widget)
 
-            if alarm.get("triggered", False):
+            # 【核心改动】过期则隐藏开关
+            if is_expired:
                 cell_widget.setVisible(False)
 
     def update_remaining_times(self):
+        now = QTime.currentTime()
         for i, alarm in enumerate(self.alarms):
             rem_item = self.table.item(i, 2)
+            is_expired = now > alarm["time"]
+
             if rem_item:
                 rem_item.setText(alarm_remaining_text(alarm))
-                if alarm.get("triggered", False):
+                if is_expired:
                     rem_item.setForeground(QColor("#bf616a"))
                 else:
                     rem_item.setForeground(QColor("#eceff4"))
 
             cell_widget = self.table.cellWidget(i, 3)
             if cell_widget:
-                cell_widget.setVisible(not alarm.get("triggered", False))
+                cell_widget.setVisible(not is_expired)
 
     def add_alarm(self):
         now = QTime.currentTime()
@@ -455,8 +432,7 @@ class AlarmSettingsDialog(QDialog):
             self.alarms.append({
                 "time": dlg.get_time(),
                 "name": dlg.get_name(),
-                "enabled": True,
-                "triggered": False,
+                "enabled": True
             })
             save_alarms(self.alarms)
             self.refresh_table()
@@ -479,13 +455,11 @@ class AlarmSettingsDialog(QDialog):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             alarm["time"] = dlg.get_time()
             alarm["name"] = dlg.get_name()
-            alarm["triggered"] = False
             save_alarms(self.alarms)
             self.refresh_table()
 
     def toggle_alarm(self, index, enabled):
         self.alarms[index]["enabled"] = enabled
-        self.alarms[index]["triggered"] = False
         save_alarms(self.alarms)
         self.update_remaining_times()
 
@@ -581,7 +555,6 @@ class ChronoGlass(QWidget):
         self.elapsed_seconds = 0
         self.drag_position = QPoint()
 
-        # 启动时读取本地配置
         self.alarms = load_alarms()
 
         self.icon_path = resource_path("tray_icon.png")
@@ -596,8 +569,6 @@ class ChronoGlass(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowIcon(QIcon(self.icon_path))
-
-        # 核心：设置窗口初始和最小尺寸，保证模式切换时窗口大小不闪烁抖动
         self.setMinimumSize(450, 180)
 
         self.main_frame = QFrame(self)
@@ -620,7 +591,6 @@ class ChronoGlass(QWidget):
 
         top_bar.addStretch()
 
-        # 1. 原有的模式切换按钮
         self.mode_btn = QPushButton("⇆")
         self.mode_btn.setFixedSize(32, 28)
         self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -628,15 +598,13 @@ class ChronoGlass(QWidget):
         self.mode_btn.clicked.connect(lambda: self.switch_mode((self.mode + 1) % 4))
         top_bar.addWidget(self.mode_btn)
 
-        # 2. 新增的最小化按钮
         self.min_btn = QPushButton("—")
         self.min_btn.setFixedSize(32, 28)
         self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.min_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.min_btn.clicked.connect(self.hide)  # 点击隐藏窗口（即最小化到托盘）
+        self.min_btn.clicked.connect(self.hide)
         top_bar.addWidget(self.min_btn)
 
-        # 3. 原有的关闭按钮
         self.close_btn = QPushButton("×")
         self.close_btn.setFixedSize(32, 28)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -647,7 +615,6 @@ class ChronoGlass(QWidget):
         frame_layout.addLayout(top_bar)
 
         self.label = QLabel()
-        # 强制 Label 占据固定高度，解决字体变小时容器缩水的问题
         self.label.setMinimumHeight(100)
         self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -700,19 +667,14 @@ class ChronoGlass(QWidget):
 
         self.tray.setContextMenu(menu)
         self.tray.setToolTip("ChronoGlass")
-
-        # 绑定托盘图标的点击事件
         self.tray.activated.connect(self.tray_icon_activated)
-
         self.tray.show()
 
     def tray_icon_activated(self, reason):
-        """处理托盘图标点击事件"""
-        # 如果是左键单击
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if self.isHidden():
                 self.show()
-                self.activateWindow()  # 确保窗口显示在最上层
+                self.activateWindow()
             else:
                 self.hide()
 
@@ -722,7 +684,6 @@ class ChronoGlass(QWidget):
         self.mode_label.setStyleSheet(f"color: {color}; background: transparent;")
         self.mode_label.setText(mode_text)
 
-        # 统一设置模式切换按钮和最小化按钮的风格
         btn_style = f"""
             QPushButton {{ color: {color}; background: rgba(216, 222, 233, 15); border: none; border-bottom: 2px solid {color}; font-size: 16px; font-weight: bold; }}
             QPushButton:hover {{ background: rgba(216, 222, 233, 30); color: #eceff4; border-bottom: 3px solid #eceff4; }}
@@ -798,19 +759,22 @@ class ChronoGlass(QWidget):
             now = QTime.currentTime()
             trigger_happened = False
             for i, alarm in enumerate(self.alarms):
-                if alarm["enabled"] and not alarm["triggered"]:
+                # 触发逻辑：只要未过期且时间对得上
+                if alarm["enabled"]:
                     if now.hour() == alarm["time"].hour() and now.minute() == alarm["time"].minute() and now.second() == \
                             alarm["time"].second():
-                        alarm["triggered"] = True
                         trigger_happened = True
                         try:
                             winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
                         except Exception:
                             pass
+
+                        # 弹出模态框 (它会阻断当前的定时器直到处理完成，因此不会在这1秒内反复触发)
                         self.show_trigger_dialog(i)
                         break
+
             if trigger_happened:
-                save_alarms(self.alarms)  # 触发后自动存档
+                save_alarms(self.alarms)
 
         self.refresh_display()
 
@@ -820,9 +784,9 @@ class ChronoGlass(QWidget):
         dlg.exec()
 
         if dlg.action == "snooze":
+            # 延时后，目标时间变大了，自然就不再是"已过期"状态了
             new_time = QTime.currentTime().addSecs(5 * 60)
             alarm["time"] = new_time
-            alarm["triggered"] = False
             save_alarms(self.alarms)
         elif dlg.action == "edit":
             self.open_alarm_settings()
@@ -856,7 +820,6 @@ class ChronoGlass(QWidget):
             self.label.setFont(QFont("Microsoft YaHei", 24, QFont.Weight.Bold))
             count = len(self.alarms)
             enabled_count = sum(1 for a in self.alarms if a["enabled"])
-            # 去除底部的右键呼出提示
             self.label.setText(f"您现在设定了 {count} 个闹钟\n(已启用 {enabled_count} 个)")
             self.update_style("#d08770", "闹钟管理")
 
@@ -875,19 +838,12 @@ class ChronoGlass(QWidget):
             self.remaining_seconds = self.default_seconds
         elif self.mode == 2:
             self.elapsed_seconds = 0
-        elif self.mode == 3:
-            for alarm in self.alarms:
-                alarm["triggered"] = False
-            save_alarms(self.alarms)
         self.is_running = False
         self.refresh_display()
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-
-    # 【关键机制】这行代码确保即使用户关闭了所有可见窗口（比如最小化到托盘），程序也不会立刻退出
     app.setQuitOnLastWindowClosed(False)
-
     clock = ChronoGlass()
     sys.exit(app.exec())
