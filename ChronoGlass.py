@@ -3,19 +3,25 @@ import os
 import json
 import winsound
 import datetime
+import urllib.request
+import urllib.parse
+import threading
 from enum import IntEnum
+
 try:
     from lunar_python import Lunar
+
     HAS_LUNAR = True
 except ImportError:
     HAS_LUNAR = False
+
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-                             QSpinBox, QLineEdit, QFormLayout, QComboBox)
+                             QSpinBox, QLineEdit, QFormLayout)
 from PyQt6.QtCore import QTimer, QTime, Qt, QPoint, QDateTime, pyqtSignal, QPropertyAnimation, pyqtProperty, \
     QEasingCurve
-from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush, QPen
+from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush
 
 
 def resource_path(relative_path):
@@ -30,17 +36,17 @@ def resource_path(relative_path):
 
 
 # --- 本地持久化工具函数 ---
-def get_data_file_path():
-    """获取闹钟数据文件的存储路径（强制保存在真正的 exe 同级目录）"""
+def get_data_file_path(filename='alarms.json'):
+    """获取数据文件的存储路径（强制保存在真正的 exe 同级目录）"""
     if getattr(sys, 'frozen', False) or "__compiled__" in globals():
         base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, 'alarms.json')
+    return os.path.join(base_path, filename)
 
 
 def load_alarms():
-    file_path = get_data_file_path()
+    file_path = get_data_file_path('alarms.json')
     alarms = []
     if os.path.exists(file_path):
         try:
@@ -53,7 +59,6 @@ def load_alarms():
                         "time": t,
                         "name": d.get("name", "新闹钟"),
                         "enabled": d.get("enabled", True)
-                        # 我们移除了对 triggered 字段的依赖
                     })
         except Exception:
             pass
@@ -61,7 +66,7 @@ def load_alarms():
 
 
 def save_alarms(alarms):
-    file_path = get_data_file_path()
+    file_path = get_data_file_path('alarms.json')
     try:
         data = []
         for a in alarms:
@@ -73,7 +78,29 @@ def save_alarms(alarms):
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"数据保存失败: {e}")
+        print(f"闹钟保存失败: {e}")
+
+
+def load_config():
+    """读取程序通用配置（如地理位置）"""
+    file_path = get_data_file_path('config.json')
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_config(config):
+    """保存程序通用配置"""
+    file_path = get_data_file_path('config.json')
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"配置保存失败: {e}")
 
 
 # --- 自定义原生平滑开关控件 ---
@@ -194,14 +221,12 @@ class CustomSpinBox(QWidget):
 
 
 def alarm_remaining_text(alarm):
-    """计算闹钟剩余时间文本 - 【核心改动：基于时间对比】"""
     if not alarm["enabled"]:
         return "已停用"
 
     now = QTime.currentTime()
     target = alarm["time"]
 
-    # 判断是否过期：如果当前时间大于设定的闹钟时间，直接判定为过期
     if now > target:
         return "已过期"
 
@@ -221,8 +246,6 @@ def alarm_remaining_text(alarm):
 
 
 class AlarmEditDialog(QDialog):
-    """单个闹钟编辑对话框"""
-
     def __init__(self, hour=0, minute=0, second=0, name="新闹钟", title="添加闹钟", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -295,8 +318,6 @@ class AlarmEditDialog(QDialog):
 
 
 class AlarmSettingsDialog(QDialog):
-    """闹钟设置界面"""
-
     def __init__(self, alarms, parent=None):
         super().__init__(parent)
         self.alarms = alarms
@@ -395,7 +416,6 @@ class AlarmSettingsDialog(QDialog):
             rem_item = QTableWidgetItem(remaining)
             rem_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            # 【核心改动】实时判断是否过期并标红
             is_expired = now > alarm["time"]
             if is_expired:
                 rem_item.setForeground(QColor("#bf616a"))
@@ -411,7 +431,6 @@ class AlarmSettingsDialog(QDialog):
             chk_layout.setContentsMargins(0, 0, 0, 0)
             self.table.setCellWidget(i, 3, cell_widget)
 
-            # 【核心改动】过期则隐藏开关
             if is_expired:
                 cell_widget.setVisible(False)
 
@@ -477,8 +496,6 @@ class AlarmSettingsDialog(QDialog):
 
 
 class AlarmTriggerDialog(QDialog):
-    """闹钟触发时的置顶模态提醒框"""
-
     def __init__(self, alarm, parent=None):
         super().__init__(parent)
         self.alarm = alarm
@@ -560,6 +577,11 @@ class AppMode(IntEnum):
 
 
 class ChronoGlass(QWidget):
+    # 【核心改动：天气更新信号】
+    weather_updated = pyqtSignal(str)
+    WINDOW_WIDTH = 450
+    WINDOW_HEIGHT = 210
+
     def __init__(self):
         super().__init__()
         self.mode = AppMode.CLOCK
@@ -571,11 +593,28 @@ class ChronoGlass(QWidget):
 
         self.alarms = load_alarms()
 
+        # 【核心改动：读取配置信息】
+        self.config = load_config()
+        self.location = self.config.get("location", "")
+        self.weather_info = ""
+
+        # 绑定天气更新槽函数
+        self.weather_updated.connect(self.on_weather_updated)
+
         self.icon_path = resource_path("tray_icon.png")
         self.tray_icon_path = resource_path("tray_icon.png")
 
         self.initUI()
         self.create_tray()
+
+        # 如果已有位置，启动时获取一次天气
+        if self.location:
+            self.fetch_weather()
+
+        # 【核心改动：每半小时自动更新天气】
+        self.weather_timer = QTimer(self)
+        self.weather_timer.timeout.connect(self.fetch_weather)
+        self.weather_timer.start(1800000)  # 30分钟 = 30 * 60 * 1000 毫秒
 
     def initUI(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint |
@@ -583,7 +622,9 @@ class ChronoGlass(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowIcon(QIcon(self.icon_path))
-        self.setMinimumSize(450, 180)
+
+        # 【核心改动 2：调用全局变量控制窗口尺寸】
+        self.setMinimumSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
 
         self.main_frame = QFrame(self)
         self.main_frame.setObjectName("MainFrame")
@@ -712,10 +753,24 @@ class ChronoGlass(QWidget):
         """)
         self.label.setStyleSheet(f"color: {color}; background: transparent; padding-bottom: 15px;")
 
+    # 【核心改动：在时钟页面双击即可设置位置，并写入 config.json】
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.mode == AppMode.COUNTDOWN:
                 self.set_custom_time()
+            elif self.mode == AppMode.CLOCK:
+                loc, ok = QInputDialog.getText(self, "设定", "输入所在地获取天气(如: 北京):", text=self.location)
+                if ok:
+                    self.location = loc.strip()
+                    self.config["location"] = self.location
+                    save_config(self.config)
+                    if self.location:
+                        self.weather_info = "获取中..."
+                        self.fetch_weather()
+                    else:
+                        self.weather_info = ""
+                    self.refresh_display()
+
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event):
@@ -760,6 +815,32 @@ class ChronoGlass(QWidget):
             self.move(event.globalPosition().toPoint() - self.drag_position)
             event.accept()
 
+    # 【核心改动：在独立线程请求天气，防卡死】
+    def fetch_weather(self):
+        if not self.location:
+            return
+
+        def _fetch():
+            try:
+                url = f"http://wttr.in/{urllib.parse.quote(self.location)}?format=%c+%t&m"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    res = response.read().decode('utf-8').strip()
+                    # 防止因为地点找不到被返回整个 HTML 页面
+                    if len(res) > 20 or "<html" in res.lower() or "unknown" in res.lower():
+                        res = "未找到该地"
+                    self.weather_updated.emit(res)
+            except Exception:
+                self.weather_updated.emit("网络异常")
+
+        # 将耗时任务放入子线程中
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    # 【核心改动：槽函数，当子线程获取完毕后刷新UI】
+    def on_weather_updated(self, weather_text):
+        self.weather_info = weather_text
+        self.refresh_display()
+
     def tick(self):
         if self.is_running:
             if self.mode == AppMode.COUNTDOWN:
@@ -778,7 +859,6 @@ class ChronoGlass(QWidget):
             now = QTime.currentTime()
             trigger_happened = False
             for i, alarm in enumerate(self.alarms):
-                # 触发逻辑：只要未过期且时间对得上
                 if alarm["enabled"]:
                     if now.secsTo(alarm["time"]) == 0:
                         trigger_happened = True
@@ -787,7 +867,6 @@ class ChronoGlass(QWidget):
                         except Exception:
                             pass
 
-                        # 弹出模态框 (它会阻断当前的定时器直到处理完成，因此不会在这1秒内反复触发)
                         self.show_trigger_dialog(i)
                         break
 
@@ -802,7 +881,6 @@ class ChronoGlass(QWidget):
         dlg.exec()
 
         if dlg.action == "snooze":
-            # 延时后，目标时间变大了，自然就不再是"已过期"状态了
             new_time = QTime.currentTime().addSecs(5 * 60)
             alarm["time"] = new_time
             save_alarms(self.alarms)
@@ -821,23 +899,32 @@ class ChronoGlass(QWidget):
             weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
             week_str = weekdays[now.weekday()]
 
+            # 【核心改动 3：第一行展示 日期、星期、天气温度】
+            weather_str = f" &nbsp;|&nbsp; {self.location} {self.weather_info}" if self.location else " &nbsp;|&nbsp; 双击添加天气"
+            line1_str = f"{date_str} {week_str}{weather_str}"
+
             if HAS_LUNAR:
                 lunar = Lunar.fromDate(now)
                 lunar_date_str = f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
                 gz_year = f"{lunar.getYearInGanZhi()}{lunar.getYearShengXiao()}年"
 
-                # 【修改点】: 使用 getJieQi()，仅当天是节气时才返回名称，否则为空
                 jieqi = lunar.getJieQi()
                 jieqi_str = f" {jieqi}" if jieqi else ""
 
                 yi = " ".join(lunar.getDayYi()[:4])
                 ji = " ".join(lunar.getDayJi()[:4])
-                info_str = f"{date_str} {week_str} {gz_year} {lunar_date_str}{jieqi_str}<br>宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
-            else:
-                info_str = f"{date_str} {week_str}<br><span style='font-size: 9pt;'>(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
 
+                # 【核心改动 3：第二行展示 农历、节气；第三行展示 黄历宜忌】
+                line2_str = f"{gz_year} {lunar_date_str}{jieqi_str}"
+                line3_str = f"宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
+
+                info_str = f"{line1_str}<br>{line2_str}<br>{line3_str}"
+            else:
+                info_str = f"{line1_str}<br><span style='font-size: 9pt;'>(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
+
+            # 加上 line-height: 1.4 让三行文字看起来不会太拥挤
             html = f"""<span style="font-family: Consolas; font-size: 52pt; font-weight: bold;">{time_str}</span><br>
-         <span style="font-family: 'Microsoft YaHei'; font-size: 11pt; font-weight: normal;">{info_str}</span>"""
+         <span style="font-family: 'Microsoft YaHei'; font-size: 11pt; font-weight: normal; line-height: 1.4;">{info_str}</span>"""
             self.label.setText(html)
             self.update_style("#88c0d0", "系统时钟")
 
