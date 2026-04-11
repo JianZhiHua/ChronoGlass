@@ -2,7 +2,13 @@ import sys
 import os
 import json
 import winsound
+import datetime
 from enum import IntEnum
+try:
+    from lunar_python import Lunar
+    HAS_LUNAR = True
+except ImportError:
+    HAS_LUNAR = False
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
@@ -809,9 +815,32 @@ class ChronoGlass(QWidget):
 
     def refresh_display(self):
         if self.mode == AppMode.CLOCK:
-            self.label.setText(QTime.currentTime().toString("HH:mm:ss"))
-            self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
+            time_str = QTime.currentTime().toString("HH:mm:ss")
+            now = datetime.datetime.now()
+            date_str = now.strftime("%Y年%m月%d日")
+            weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+            week_str = weekdays[now.weekday()]
+
+            if HAS_LUNAR:
+                lunar = Lunar.fromDate(now)
+                lunar_date_str = f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
+                gz_year = f"{lunar.getYearInGanZhi()}{lunar.getYearShengXiao()}年"
+
+                # 【修改点】: 使用 getJieQi()，仅当天是节气时才返回名称，否则为空
+                jieqi = lunar.getJieQi()
+                jieqi_str = f" {jieqi}" if jieqi else ""
+
+                yi = " ".join(lunar.getDayYi()[:4])
+                ji = " ".join(lunar.getDayJi()[:4])
+                info_str = f"{date_str} {week_str} {gz_year} {lunar_date_str}{jieqi_str}<br>宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
+            else:
+                info_str = f"{date_str} {week_str}<br><span style='font-size: 9pt;'>(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
+
+            html = f"""<span style="font-family: Consolas; font-size: 52pt; font-weight: bold;">{time_str}</span><br>
+         <span style="font-family: 'Microsoft YaHei'; font-size: 11pt; font-weight: normal;">{info_str}</span>"""
+            self.label.setText(html)
             self.update_style("#88c0d0", "系统时钟")
+
         elif self.mode == AppMode.COUNTDOWN:
             self.label.setText(self.format_time(self.remaining_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
@@ -821,6 +850,7 @@ class ChronoGlass(QWidget):
                 self.update_style("#ebcb8b", "倒计时进行中")
             else:
                 self.update_style("#a3be8c", "倒计时已暂停")
+
         elif self.mode == AppMode.STOPWATCH:
             self.label.setText(self.format_time(self.elapsed_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
@@ -828,6 +858,7 @@ class ChronoGlass(QWidget):
                 self.update_style("#b48ead", "正在计时")
             else:
                 self.update_style("#d8dee9", "计时已暂停")
+
         elif self.mode == AppMode.ALARM:
             self.label.setFont(QFont("Microsoft YaHei", 24, QFont.Weight.Bold))
             count = len(self.alarms)
