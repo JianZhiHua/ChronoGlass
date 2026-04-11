@@ -5,7 +5,7 @@ import winsound
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-                             QSpinBox, QLineEdit, QFormLayout, QComboBox)
+                             QSpinBox, QLineEdit, QFormLayout, QComboBox,QAbstractSpinBox)
 from PyQt6.QtCore import QTimer, QTime, Qt, QPoint, QDateTime, pyqtSignal, QPropertyAnimation, pyqtProperty, \
     QEasingCurve
 from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush, QPen
@@ -23,12 +23,17 @@ def resource_path(relative_path):
 
 
 # --- 本地持久化工具函数 ---
+# --- 本地持久化工具函数 ---
 def get_data_file_path():
-    """获取闹钟数据文件的存储路径（在程序所在同级目录）"""
-    if getattr(sys, 'frozen', False):
-        base_path = os.path.dirname(sys.executable)
+    """获取闹钟数据文件的存储路径（强制保存在真正的 exe 同级目录）"""
+    # 兼容 Nuitka 和 PyInstaller 的真实路径获取
+    if getattr(sys, 'frozen', False) or "__compiled__" in globals():
+        # 获取打包后可执行文件的真实所在目录，而不是临时解压目录
+        base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
     else:
+        # 源码运行时的目录
         base_path = os.path.dirname(os.path.abspath(__file__))
+
     return os.path.join(base_path, 'alarms.json')
 
 
@@ -64,10 +69,12 @@ def save_alarms(alarms):
                 "enabled": a["enabled"],
                 "triggered": a["triggered"]
             })
+        # 写入数据
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        # 如果出现权限问题（例如放在了 C 盘只读目录下），可以在控制台看到报错
+        print(f"数据保存失败: {e}")
 
 
 # --- 自定义原生平滑开关控件 (解决状态栏按钮渲染问题) ---
@@ -129,6 +136,85 @@ class ToggleSwitch(QWidget):
         painter.end()
 
 
+from PyQt6.QtWidgets import QAbstractSpinBox
+
+
+class CustomSpinBox(QWidget):
+    """纯代码拼装的上下带 + - 文本的输入框，免疫一切打包丢图问题"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(80, 30)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 1. 隐藏自带按钮的输入框
+        self.spin = QSpinBox()
+        self.spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.spin.setFixedSize(55, 30)  # 留 25px 给右边的按钮
+        self.spin.setStyleSheet("""
+            QSpinBox {
+                background-color: #3b4252;
+                border: 1px solid #4c566a;
+                border-right: none; /* 右侧开口，为了和按钮拼接 */
+                border-top-left-radius: 4px;
+                border-bottom-left-radius: 4px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                padding: 5px;
+                color: #eceff4;
+            }
+        """)
+
+        # 2. 右侧按钮布局
+        btn_layout = QVBoxLayout()
+        btn_layout.setSpacing(0)
+
+        # 按钮通用样式
+        btn_style = """
+            QPushButton {
+                background-color: #2e3440;
+                border: 1px solid #4c566a;
+                color: #eceff4;
+                font-family: 'Consolas', 'Microsoft YaHei';
+                font-weight: bold;
+                font-size: 14px;
+                padding: 0px;
+            }
+            QPushButton:hover { background-color: #434c5e; }
+            QPushButton:pressed { background-color: #2e3440; }
+        """
+
+        # 加号按钮
+        self.btn_up = QPushButton("+")
+        self.btn_up.setFixedSize(25, 15)
+        self.btn_up.setStyleSheet(btn_style + "border-top-right-radius: 4px; border-bottom: none;")
+        self.btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_up.clicked.connect(self.spin.stepUp)
+
+        # 减号按钮
+        self.btn_down = QPushButton("-")
+        self.btn_down.setFixedSize(25, 15)
+        self.btn_down.setStyleSheet(btn_style + "border-bottom-right-radius: 4px;")
+        self.btn_down.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_down.clicked.connect(self.spin.stepDown)
+
+        btn_layout.addWidget(self.btn_up)
+        btn_layout.addWidget(self.btn_down)
+
+        layout.addWidget(self.spin)
+        layout.addLayout(btn_layout)
+
+    # 代理 QSpinBox 的常用方法，让外部调用完全无感知
+    def value(self): return self.spin.value()
+
+    def setValue(self, v): self.spin.setValue(v)
+
+    def setRange(self, min_val, max_val): self.spin.setRange(min_val, max_val)
+
+
 def alarm_remaining_text(alarm):
     """计算闹钟剩余时间文本"""
     if not alarm["enabled"]:
@@ -166,51 +252,6 @@ class AlarmEditDialog(QDialog):
         self.setFixedSize(350, 220)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setStyleSheet("QDialog { background-color: #2e3440; color: #d8dee9; }")
-        up_img = resource_path("add.png").replace("\\", "/")
-        down_img = resource_path("sub.png").replace("\\", "/")
-        spinbox_style = f"""
-                    QSpinBox {{ 
-                        background-color: #3b4252; 
-                        border: 1px solid #4c566a; 
-                        border-radius: 4px; 
-                        padding: 5px; 
-                        color: #eceff4; 
-                    }}
-
-                    /* --- 1. 控制按钮背景区域和宽度 --- */
-                    QSpinBox::up-button {{
-                        width: 25px;
-                        background-color:#5888e6;
-                        border-left: 1px solid #4c566a;
-                        border-top-right-radius: 4px;
-                    }}
-                    QSpinBox::down-button {{
-                        width: 25px;
-                        background-color:#5888e6;
-                        border-left: 1px solid #4c566a;
-                        border-bottom-right-radius: 4px;
-                    }}
-                    QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-                        background-color: #434c5e;
-                    }}
-
-                    /* --- 2. 控制内部的自定义图标 --- */
-                    QSpinBox::up-arrow {{
-                        image: url("{up_img}");
-                        width: 12px;  /* 控制图标的显示宽度 */
-                        height: 12px; /* 控制图标的显示高度 */
-                    }}
-                    QSpinBox::down-arrow {{
-                        image: url("{down_img}");
-                        width: 12px;
-                        height: 12px;
-                    }}
-
-                    /* 禁用状态下可以隐藏箭头或换一张灰暗的图 */
-                    QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled {{
-                        image: none; 
-                    }}
-                """
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 15)
@@ -219,23 +260,18 @@ class AlarmEditDialog(QDialog):
         form.setSpacing(10)
         form.setContentsMargins(0, 0, 0, 10)
 
-        self.spin_h = QSpinBox()
+        # 直接使用我们刚才封装的绝对不会丢图的 CustomSpinBox
+        self.spin_h = CustomSpinBox()
         self.spin_h.setRange(0, 23)
-        self.spin_h.setFixedSize(80, 30)
         self.spin_h.setValue(hour)
-        self.spin_h.setStyleSheet(spinbox_style)
 
-        self.spin_m = QSpinBox()
+        self.spin_m = CustomSpinBox()
         self.spin_m.setRange(0, 59)
-        self.spin_m.setFixedSize(80, 30)
         self.spin_m.setValue(minute)
-        self.spin_m.setStyleSheet(spinbox_style)
 
-        self.spin_s = QSpinBox()
+        self.spin_s = CustomSpinBox()
         self.spin_s.setRange(0, 59)
-        self.spin_s.setFixedSize(80, 30)
         self.spin_s.setValue(second)
-        self.spin_s.setStyleSheet(spinbox_style)
 
         time_layout = QHBoxLayout()
         time_layout.addWidget(self.spin_h)
@@ -247,8 +283,7 @@ class AlarmEditDialog(QDialog):
 
         self.name_edit = QLineEdit()
         self.name_edit.setText(name)
-        self.name_edit.setStyleSheet(
-            "QLineEdit { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }")
+        self.name_edit.setStyleSheet("QLineEdit { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }")
         form.addRow("标签", self.name_edit)
 
         layout.addLayout(form)
@@ -258,14 +293,12 @@ class AlarmEditDialog(QDialog):
 
         cancel_btn = QPushButton("取消")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet(
-            "QPushButton { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 6px; padding: 6px 18px; color: #d8dee9; } QPushButton:hover { background-color: #4c566a; }")
+        cancel_btn.setStyleSheet("QPushButton { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 6px; padding: 6px 18px; color: #d8dee9; } QPushButton:hover { background-color: #4c566a; }")
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("确定")
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        ok_btn.setStyleSheet(
-            "QPushButton { background-color: #88c0d0; color: #2e3440; border-radius: 6px; padding: 6px 18px; font-weight: bold; } QPushButton:hover { background-color: #8fbcbb; }")
+        ok_btn.setStyleSheet("QPushButton { background-color: #88c0d0; color: #2e3440; border-radius: 6px; padding: 6px 18px; font-weight: bold; } QPushButton:hover { background-color: #8fbcbb; }")
         ok_btn.clicked.connect(self.accept)
 
         btn_layout.addWidget(cancel_btn)
@@ -280,7 +313,6 @@ class AlarmEditDialog(QDialog):
 
     def get_name(self):
         return self.name_edit.text().strip() or "新闹钟"
-
 
 class AlarmSettingsDialog(QDialog):
     """闹钟设置界面 (暗黑主题)"""
