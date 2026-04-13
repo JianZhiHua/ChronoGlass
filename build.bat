@@ -101,6 +101,6 @@ signtool sign /f "%CERT_PATH%" /p %CERT_PWD% /fd SHA256 /t http://timestamp.digi
 echo.
 echo ======================================================
 echo 构建成功！你的 ChronoGlass 已准备就绪。
-echo 开发者: HuanQingYi
+echo By_HuanQingYi
 echo ======================================================
 pause

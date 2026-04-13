@@ -3,13 +3,14 @@ import os
 import json
 import winsound
 import datetime
+import traceback
 import urllib.request
 import urllib.parse
 import threading
 from enum import IntEnum
 
 try:
-    from lunar_python import Lunar
+    from lunar_python import Lunar, Solar
 
     HAS_LUNAR = True
 except ImportError:
@@ -18,10 +19,16 @@ except ImportError:
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-                             QSpinBox, QLineEdit, QFormLayout)
+                             QSpinBox, QLineEdit, QFormLayout, QComboBox)
 from PyQt6.QtCore import QTimer, QTime, Qt, QPoint, QDateTime, pyqtSignal, QPropertyAnimation, pyqtProperty, \
     QEasingCurve
 from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush
+
+
+STATE_FILE_NAME = "chronoglass_state.json"
+LEGACY_ALARMS_FILE_NAME = "alarms.json"
+LEGACY_CONFIG_FILE_NAME = "config.json"
+STATE_LOCK = threading.RLock()
 
 
 def resource_path(relative_path):
@@ -36,7 +43,7 @@ def resource_path(relative_path):
 
 
 # --- 本地持久化工具函数 ---
-def get_data_file_path(filename='alarms.json'):
+def get_data_file_path(filename=STATE_FILE_NAME):
     """获取数据文件的存储路径（强制保存在真正的 exe 同级目录）"""
     if getattr(sys, 'frozen', False) or "__compiled__" in globals():
         base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -45,62 +52,189 @@ def get_data_file_path(filename='alarms.json'):
     return os.path.join(base_path, filename)
 
 
-def load_alarms():
-    file_path = get_data_file_path('alarms.json')
-    alarms = []
-    if os.path.exists(file_path):
+def log_error(message, exc=None):
+    try:
+        log_path = get_data_file_path('chronoglass.log')
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        detail = f"[{now}] {message}\n"
+        if exc is not None:
+            detail += "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(detail)
+            f.write("\n")
+    except Exception:
+        return
+
+
+def atomic_write_json(file_path, data):
+    tmp_path = f"{file_path}.tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, file_path)
+
+
+def read_json_file(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def normalize_alarm(record):
+    alarm = dict(record)
+    time_value = alarm.get("time", "00:00:00")
+    if isinstance(time_value, QTime):
+        alarm["time"] = time_value if time_value.isValid() else QTime(0, 0)
+    else:
+        parsed_time = QTime.fromString(str(time_value), "HH:mm:ss")
+        alarm["time"] = parsed_time if parsed_time.isValid() else QTime(0, 0)
+
+    alarm.setdefault("name", "新闹钟")
+    alarm.setdefault("enabled", True)
+    alarm.setdefault("repeat", "once")
+    alarm.setdefault("last_trigger_date", "")
+    if alarm["repeat"] not in ("once", "daily"):
+        alarm["repeat"] = "once"
+    return alarm
+
+
+def serialize_alarm(alarm):
+    repeat = alarm.get("repeat", "once")
+    if repeat not in ("once", "daily"):
+        repeat = "once"
+
+    time_value = alarm.get("time", QTime(0, 0))
+    if isinstance(time_value, QTime):
+        time_str = time_value.toString("HH:mm:ss")
+    else:
+        time_str = str(time_value)
+        if not QTime.fromString(time_str, "HH:mm:ss").isValid():
+            time_str = "00:00:00"
+
+    return {
+        "time": time_str,
+        "name": alarm.get("name", "新闹钟"),
+        "enabled": alarm.get("enabled", True),
+        "repeat": repeat,
+        "last_trigger_date": alarm.get("last_trigger_date", "")
+    }
+
+
+def deserialize_alarm(record):
+    return normalize_alarm({
+        "time": record.get("time", "00:00:00"),
+        "name": record.get("name", "新闹钟"),
+        "enabled": record.get("enabled", True),
+        "repeat": record.get("repeat", "once"),
+        "last_trigger_date": record.get("last_trigger_date", "")
+    })
+
+
+def default_state():
+    return {
+        "version": 1,
+        "config": {},
+        "alarms": []
+    }
+
+
+def normalize_state(record):
+    state = default_state()
+    if not isinstance(record, dict):
+        return state
+
+    version = record.get("version")
+    if isinstance(version, int):
+        state["version"] = version
+
+    config = record.get("config")
+    if isinstance(config, dict):
+        state["config"] = dict(config)
+
+    alarms = record.get("alarms")
+    if isinstance(alarms, list):
+        state["alarms"] = [deserialize_alarm(alarm) for alarm in alarms if isinstance(alarm, dict)]
+
+    return state
+
+
+def serialize_state(state):
+    normalized = normalize_state(state)
+    return {
+        "version": normalized["version"],
+        "config": normalized["config"],
+        "alarms": [serialize_alarm(alarm) for alarm in normalized["alarms"]]
+    }
+
+
+def load_legacy_state():
+    state = default_state()
+
+    alarms_path = get_data_file_path(LEGACY_ALARMS_FILE_NAME)
+    if os.path.exists(alarms_path):
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                for d in data:
-                    t = QTime.fromString(d.get("time", "00:00:00"), "HH:mm:ss")
-                    if not t.isValid(): t = QTime(0, 0)
-                    alarms.append({
-                        "time": t,
-                        "name": d.get("name", "新闹钟"),
-                        "enabled": d.get("enabled", True)
-                    })
-        except Exception:
-            pass
-    return alarms
+            data = read_json_file(alarms_path)
+            if isinstance(data, list):
+                state["alarms"] = [deserialize_alarm(alarm) for alarm in data if isinstance(alarm, dict)]
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+            log_error("读取旧版 alarms.json 失败", e)
+
+    config_path = get_data_file_path(LEGACY_CONFIG_FILE_NAME)
+    if os.path.exists(config_path):
+        try:
+            data = read_json_file(config_path)
+            if isinstance(data, dict):
+                state["config"] = dict(data)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+            log_error("读取旧版 config.json 失败", e)
+
+    return state
+
+
+def load_state():
+    file_path = get_data_file_path(STATE_FILE_NAME)
+    with STATE_LOCK:
+        if os.path.exists(file_path):
+            try:
+                return normalize_state(read_json_file(file_path))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+                log_error(f"读取 {STATE_FILE_NAME} 失败", e)
+
+        state = load_legacy_state()
+        if state["alarms"] or state["config"]:
+            save_state(state)
+        return state
+
+
+def save_state(state):
+    file_path = get_data_file_path(STATE_FILE_NAME)
+    try:
+        payload = serialize_state(state)
+        with STATE_LOCK:
+            atomic_write_json(file_path, payload)
+    except Exception as e:
+        print(f"状态保存失败: {e}")
+        log_error(f"写入 {STATE_FILE_NAME} 失败", e)
+
+
+def load_alarms():
+    return load_state()["alarms"]
 
 
 def save_alarms(alarms):
-    file_path = get_data_file_path('alarms.json')
-    try:
-        data = []
-        for a in alarms:
-            data.append({
-                "time": a["time"].toString("HH:mm:ss"),
-                "name": a["name"],
-                "enabled": a["enabled"]
-            })
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"闹钟保存失败: {e}")
+    state = load_state()
+    state["alarms"] = list(alarms)
+    save_state(state)
 
 
 def load_config():
     """读取程序通用配置（如地理位置）"""
-    file_path = get_data_file_path('config.json')
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    return load_state()["config"]
 
 
 def save_config(config):
     """保存程序通用配置"""
-    file_path = get_data_file_path('config.json')
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"配置保存失败: {e}")
+    state = load_state()
+    state["config"] = dict(config)
+    save_state(state)
 
 
 # --- 自定义原生平滑开关控件 ---
@@ -221,32 +355,53 @@ class CustomSpinBox(QWidget):
 
 
 def alarm_remaining_text(alarm):
+    today = datetime.date.today().isoformat()
+    last_trigger_date = alarm.get("last_trigger_date", "")
+    repeat = alarm.get("repeat", "once")
+
+    if repeat == "once" and last_trigger_date == today:
+        return "已触发"
     if not alarm["enabled"]:
         return "已停用"
 
     now = QTime.currentTime()
     target = alarm["time"]
-
-    if now > target:
-        return "已过期"
-
     now_sec = now.hour() * 3600 + now.minute() * 60 + now.second()
     target_sec = target.hour() * 3600 + target.minute() * 60 + target.second()
     diff = target_sec - now_sec
+
+    if repeat == "once":
+        if diff < 0:
+            return "已过期"
+    else:
+        if last_trigger_date == today and diff <= 0:
+            diff += 24 * 3600
+        elif diff < 0:
+            diff += 24 * 3600
 
     hours, rem = divmod(diff, 3600)
     minutes, seconds = divmod(rem, 60)
 
     if hours > 0:
+        if minutes > 0:
+            return f"{hours}小时{minutes}分钟"
+        if seconds > 0:
+            return f"{hours}小时{seconds}秒"
         return f"{hours}小时"
-    elif minutes > 0:
+
+    if minutes > 0:
+        if seconds > 0:
+            return f"{minutes}分{seconds}秒"
         return f"{minutes}分钟"
-    else:
-        return "即将触发"
+
+    if seconds > 0:
+        return f"{seconds}秒"
+
+    return "即将触发"
 
 
 class AlarmEditDialog(QDialog):
-    def __init__(self, hour=0, minute=0, second=0, name="新闹钟", title="添加闹钟", parent=None):
+    def __init__(self, hour=0, minute=0, second=0, name="新闹钟", repeat="once", title="添加闹钟", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setFixedSize(350, 220)
@@ -286,6 +441,15 @@ class AlarmEditDialog(QDialog):
             "QLineEdit { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }")
         form.addRow("标签", self.name_edit)
 
+        self.repeat_combo = QComboBox()
+        self.repeat_combo.addItem("一次性", "once")
+        self.repeat_combo.addItem("每天", "daily")
+        idx = self.repeat_combo.findData(repeat)
+        self.repeat_combo.setCurrentIndex(0 if idx < 0 else idx)
+        self.repeat_combo.setStyleSheet(
+            "QComboBox { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }")
+        form.addRow("重复", self.repeat_combo)
+
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -315,6 +479,9 @@ class AlarmEditDialog(QDialog):
 
     def get_name(self):
         return self.name_edit.text().strip() or "新闹钟"
+
+    def get_repeat(self):
+        return self.repeat_combo.currentData()
 
 
 class AlarmSettingsDialog(QDialog):
@@ -355,13 +522,14 @@ class AlarmSettingsDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["时间", "闹钟标签", "剩余", "状态"])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["时间", "闹钟标签", "重复", "剩余", "状态"])
 
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -412,14 +580,19 @@ class AlarmSettingsDialog(QDialog):
             name_item = QTableWidgetItem(alarm["name"])
             self.table.setItem(i, 1, name_item)
 
+            repeat_text = "每天" if alarm.get("repeat", "once") == "daily" else "一次性"
+            repeat_item = QTableWidgetItem(repeat_text)
+            repeat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(i, 2, repeat_item)
+
             remaining = alarm_remaining_text(alarm)
             rem_item = QTableWidgetItem(remaining)
             rem_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            is_expired = now > alarm["time"]
+            is_expired = alarm.get("repeat", "once") == "once" and remaining in ("已过期", "已触发")
             if is_expired:
                 rem_item.setForeground(QColor("#bf616a"))
-            self.table.setItem(i, 2, rem_item)
+            self.table.setItem(i, 3, rem_item)
 
             chk = ToggleSwitch(checked=alarm["enabled"])
             chk.toggled.connect(lambda checked, idx=i: self.toggle_alarm(idx, checked))
@@ -429,7 +602,7 @@ class AlarmSettingsDialog(QDialog):
             chk_layout.addWidget(chk)
             chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             chk_layout.setContentsMargins(0, 0, 0, 0)
-            self.table.setCellWidget(i, 3, cell_widget)
+            self.table.setCellWidget(i, 4, cell_widget)
 
             if is_expired:
                 cell_widget.setVisible(False)
@@ -437,28 +610,31 @@ class AlarmSettingsDialog(QDialog):
     def update_remaining_times(self):
         now = QTime.currentTime()
         for i, alarm in enumerate(self.alarms):
-            rem_item = self.table.item(i, 2)
-            is_expired = now > alarm["time"]
+            rem_item = self.table.item(i, 3)
+            rem_text = alarm_remaining_text(alarm)
+            is_expired = alarm.get("repeat", "once") == "once" and rem_text in ("已过期", "已触发")
 
             if rem_item:
-                rem_item.setText(alarm_remaining_text(alarm))
+                rem_item.setText(rem_text)
                 if is_expired:
                     rem_item.setForeground(QColor("#bf616a"))
                 else:
                     rem_item.setForeground(QColor("#eceff4"))
 
-            cell_widget = self.table.cellWidget(i, 3)
+            cell_widget = self.table.cellWidget(i, 4)
             if cell_widget:
                 cell_widget.setVisible(not is_expired)
 
     def add_alarm(self):
         now = QTime.currentTime()
-        dlg = AlarmEditDialog(now.hour(), now.minute(), 0, "新闹钟", "添加闹钟", self)
+        dlg = AlarmEditDialog(now.hour(), now.minute(), 0, "新闹钟", "once", "添加闹钟", self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.alarms.append({
                 "time": dlg.get_time(),
                 "name": dlg.get_name(),
-                "enabled": True
+                "enabled": True,
+                "repeat": dlg.get_repeat(),
+                "last_trigger_date": ""
             })
             save_alarms(self.alarms)
             self.refresh_table()
@@ -476,11 +652,13 @@ class AlarmSettingsDialog(QDialog):
         alarm = self.alarms[row]
         dlg = AlarmEditDialog(
             alarm["time"].hour(), alarm["time"].minute(), alarm["time"].second(),
-            alarm["name"], "修改闹钟", self
+            alarm["name"], alarm.get("repeat", "once"), "修改闹钟", self
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             alarm["time"] = dlg.get_time()
             alarm["name"] = dlg.get_name()
+            alarm["repeat"] = dlg.get_repeat()
+            alarm["last_trigger_date"] = ""
             save_alarms(self.alarms)
             self.refresh_table()
 
@@ -506,6 +684,7 @@ class AlarmTriggerDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint |
                             Qt.WindowType.FramelessWindowHint |
                             Qt.WindowType.Dialog)
+        self.setModal(True)
         self.setFixedSize(450, 260)
         self.setStyleSheet("QDialog { background-color: #2e3440; border: 2px solid #bf616a; border-radius: 12px; }")
 
@@ -517,6 +696,9 @@ class AlarmTriggerDialog(QDialog):
         close_btn = QPushButton("✖")
         close_btn.setFixedSize(24, 24)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
         close_btn.setStyleSheet(
             "QPushButton { border: none; color: #4c566a; font-weight: bold; font-size: 16px; } QPushButton:hover { color: #bf616a; }")
         close_btn.clicked.connect(self.do_done)
@@ -552,6 +734,9 @@ class AlarmTriggerDialog(QDialog):
                                    (done_btn, "#bf616a", "#a3be8c")]:
             btn.setFixedHeight(40)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
             btn.setStyleSheet(
                 f"background-color: {color}; color: #2e3440; border-radius: 6px; font-size: 15px; font-weight: bold;")
             btn_layout.addWidget(btn)
@@ -567,6 +752,21 @@ class AlarmTriggerDialog(QDialog):
     def do_edit(self): self.action = "edit"; self.accept()
 
     def do_done(self): self.action = "done"; self.accept()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.activate_dialog)
+
+    def activate_dialog(self):
+        self.raise_()
+        self.activateWindow()
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class AppMode(IntEnum):
@@ -597,6 +797,10 @@ class ChronoGlass(QWidget):
         self.config = load_config()
         self.location = self.config.get("location", "")
         self.weather_info = ""
+        self.weather_fetch_inflight = False
+        self.weather_lock = threading.Lock()
+        self.cached_clock_info_date = None
+        self.cached_clock_info_html = ""
 
         # 绑定天气更新槽函数
         self.weather_updated.connect(self.on_weather_updated)
@@ -753,7 +957,7 @@ class ChronoGlass(QWidget):
         """)
         self.label.setStyleSheet(f"color: {color}; background: transparent; padding-bottom: 15px;")
 
-    # 【核心改动：在时钟页面双击即可设置位置，并写入 config.json】
+    # 【核心改动：在时钟页面双击即可设置位置，并写入统一状态文件】
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.mode == AppMode.COUNTDOWN:
@@ -764,6 +968,7 @@ class ChronoGlass(QWidget):
                     self.location = loc.strip()
                     self.config["location"] = self.location
                     save_config(self.config)
+                    self.cached_clock_info_date = None
                     if self.location:
                         self.weather_info = "获取中..."
                         self.fetch_weather()
@@ -820,9 +1025,14 @@ class ChronoGlass(QWidget):
         if not self.location:
             return
 
+        with self.weather_lock:
+            if self.weather_fetch_inflight:
+                return
+            self.weather_fetch_inflight = True
+
         def _fetch():
             try:
-                url = f"http://wttr.in/{urllib.parse.quote(self.location)}?format=%c+%t&m"
+                url = f"https://wttr.in/{urllib.parse.quote(self.location)}?format=%c+%t&m"
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req, timeout=5) as response:
                     res = response.read().decode('utf-8').strip()
@@ -830,8 +1040,12 @@ class ChronoGlass(QWidget):
                     if len(res) > 20 or "<html" in res.lower() or "unknown" in res.lower():
                         res = "未找到该地"
                     self.weather_updated.emit(res)
-            except Exception:
+            except Exception as e:
+                log_error("天气请求失败", e)
                 self.weather_updated.emit("网络异常")
+            finally:
+                with self.weather_lock:
+                    self.weather_fetch_inflight = False
 
         # 将耗时任务放入子线程中
         threading.Thread(target=_fetch, daemon=True).start()
@@ -839,7 +1053,95 @@ class ChronoGlass(QWidget):
     # 【核心改动：槽函数，当子线程获取完毕后刷新UI】
     def on_weather_updated(self, weather_text):
         self.weather_info = weather_text
+        self.cached_clock_info_date = None
         self.refresh_display()
+
+    def should_trigger_alarm(self, alarm, today):
+        if not alarm.get("enabled", True):
+            return False
+
+        if alarm.get("last_trigger_date", "") == today:
+            return False
+
+        now = QTime.currentTime()
+        target = alarm["time"]
+        now_sec = now.hour() * 3600 + now.minute() * 60 + now.second()
+        target_sec = target.hour() * 3600 + target.minute() * 60 + target.second()
+        diff = now_sec - target_sec
+
+        return 0 <= diff <= 1
+
+    def format_days_until(self, days):
+        if days is None:
+            return "暂无"
+        if days <= 0:
+            return "今天"
+        return f"还有{days}天"
+
+    def truncate_display_text(self, text, max_chars=8):
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars]}..."
+
+    def get_next_festival_info(self, today):
+        for offset in range(0, 367):
+            target_date = today + datetime.timedelta(days=offset)
+            solar = Solar.fromYmd(target_date.year, target_date.month, target_date.day)
+            lunar = solar.getLunar()
+
+            official = list(solar.getFestivals()) + list(lunar.getFestivals())
+            if official:
+                return "、".join(official[:2]), offset
+
+        return "暂无", None
+
+    def get_next_jieqi_info(self, lunar, today):
+        current_jieqi = lunar.getCurrentJieQi()
+        if current_jieqi:
+            return str(current_jieqi), 0
+
+        jieqi = lunar.getNextJieQi()
+        if jieqi is None:
+            return "暂无", None
+
+        solar = jieqi.getSolar()
+        target_date = datetime.date(solar.getYear(), solar.getMonth(), solar.getDay())
+        offset = (target_date - today).days
+        return jieqi.getName(), max(offset, 0)
+
+    def get_clock_info_html(self, now):
+        today = now.date()
+        if self.cached_clock_info_date == today and self.cached_clock_info_html:
+            return self.cached_clock_info_html
+
+        date_str = now.strftime("%Y年%m月%d日")
+        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        week_str = weekdays[now.weekday()]
+
+        weather_str = f" &nbsp;|&nbsp; {self.location} {self.weather_info}" if self.location else " &nbsp;|&nbsp; 双击添加天气"
+        line1_str = f"{date_str} {week_str}{weather_str}"
+
+        if HAS_LUNAR:
+            lunar = Lunar.fromDate(now)
+            festival_name, festival_days = self.get_next_festival_info(today)
+            jieqi_name, jieqi_days = self.get_next_jieqi_info(lunar, today)
+            lunar_date_str = f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
+            yi = " ".join(lunar.getDayYi()[:2]) or "无"
+            ji = " ".join(lunar.getDayJi()[:2]) or "无"
+            festival_display = self.truncate_display_text(festival_name)
+
+            line2_str = (
+                f"下个节日: {festival_display}({self.format_days_until(festival_days)})"
+                f" &nbsp;|&nbsp; 最近节气: {jieqi_name}({self.format_days_until(jieqi_days)})"
+            )
+            line3_str = f"{lunar_date_str} &nbsp;|&nbsp; 宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
+            info_str = f"{line1_str}<br>{line2_str}<br>{line3_str}"
+        else:
+            info_str = f"{line1_str}<br><span style='font-size: 9pt;'>(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
+
+        self.cached_clock_info_date = today
+        self.cached_clock_info_html = info_str
+        return info_str
 
     def tick(self):
         if self.is_running:
@@ -850,25 +1152,28 @@ class ChronoGlass(QWidget):
                     self.is_running = False
                     try:
                         winsound.MessageBeep(winsound.MB_ICONASTERISK)
-                    except Exception:
-                        pass
+                    except RuntimeError as e:
+                        log_error("倒计时提示音播放失败", e)
             elif self.mode == AppMode.STOPWATCH:
                 self.elapsed_seconds += 1
 
         if self.alarms:
-            now = QTime.currentTime()
+            today = datetime.date.today().isoformat()
             trigger_happened = False
             for i, alarm in enumerate(self.alarms):
-                if alarm["enabled"]:
-                    if now.secsTo(alarm["time"]) == 0:
-                        trigger_happened = True
-                        try:
-                            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-                        except Exception:
-                            pass
+                if self.should_trigger_alarm(alarm, today):
+                    trigger_happened = True
+                    alarm["last_trigger_date"] = today
+                    if alarm.get("repeat", "once") == "once":
+                        alarm["enabled"] = False
 
-                        self.show_trigger_dialog(i)
-                        break
+                    try:
+                        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                    except RuntimeError as e:
+                        log_error("闹钟提示音播放失败", e)
+
+                    self.show_trigger_dialog(i)
+                    break
 
             if trigger_happened:
                 save_alarms(self.alarms)
@@ -883,11 +1188,15 @@ class ChronoGlass(QWidget):
         if dlg.action == "snooze":
             new_time = QTime.currentTime().addSecs(5 * 60)
             alarm["time"] = new_time
+            alarm["enabled"] = True
+            alarm["last_trigger_date"] = ""
             save_alarms(self.alarms)
         elif dlg.action == "edit":
             self.open_alarm_settings()
         elif dlg.action == "done":
-            pass
+            if alarm.get("repeat", "once") == "once":
+                alarm["enabled"] = False
+            save_alarms(self.alarms)
 
         self.refresh_display()
 
@@ -895,32 +1204,7 @@ class ChronoGlass(QWidget):
         if self.mode == AppMode.CLOCK:
             time_str = QTime.currentTime().toString("HH:mm:ss")
             now = datetime.datetime.now()
-            date_str = now.strftime("%Y年%m月%d日")
-            weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-            week_str = weekdays[now.weekday()]
-
-            # 【核心改动 3：第一行展示 日期、星期、天气温度】
-            weather_str = f" &nbsp;|&nbsp; {self.location} {self.weather_info}" if self.location else " &nbsp;|&nbsp; 双击添加天气"
-            line1_str = f"{date_str} {week_str}{weather_str}"
-
-            if HAS_LUNAR:
-                lunar = Lunar.fromDate(now)
-                lunar_date_str = f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
-                gz_year = f"{lunar.getYearInGanZhi()}{lunar.getYearShengXiao()}年"
-
-                jieqi = lunar.getJieQi()
-                jieqi_str = f" {jieqi}" if jieqi else ""
-
-                yi = " ".join(lunar.getDayYi()[:4])
-                ji = " ".join(lunar.getDayJi()[:4])
-
-                # 【核心改动 3：第二行展示 农历、节气；第三行展示 黄历宜忌】
-                line2_str = f"{gz_year} {lunar_date_str}{jieqi_str}"
-                line3_str = f"宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
-
-                info_str = f"{line1_str}<br>{line2_str}<br>{line3_str}"
-            else:
-                info_str = f"{line1_str}<br><span style='font-size: 9pt;'>(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
+            info_str = self.get_clock_info_html(now)
 
             # 加上 line-height: 1.4 让三行文字看起来不会太拥挤
             html = f"""<span style="font-family: Consolas; font-size: 52pt; font-weight: bold;">{time_str}</span><br>
