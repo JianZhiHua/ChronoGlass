@@ -2,4 +2,3 @@
 .venv
 .idea
 nuitka-crash-report.xml
-cli.exe
