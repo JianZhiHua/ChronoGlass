@@ -170,6 +170,21 @@ pip install nuitka zstandard
 python ChronoGlass.py
 ```
 
+当前版本仍然保留 `ChronoGlass.py` 作为兼容入口，但主逻辑已经拆分到 `chronoglass/` 包内，便于后续维护和扩展。
+
+## 代码结构
+
+拆分后的核心模块如下：
+
+- `chronoglass/app.py`：主窗口、模式切换、天气刷新、托盘菜单、应用启动入口
+- `chronoglass/dialogs.py`：闹钟编辑、闹钟列表、闹钟提醒、目标倒计时编辑等对话框
+- `chronoglass/state.py`：配置与闹钟的序列化、状态文件读写、旧数据迁移、日志记录
+- `chronoglass/widgets.py`：自定义开关、自定义步进器等可复用控件
+- `chronoglass/common.py`：资源路径、数据文件路径、公共常量
+- `ChronoGlass.py`：轻量启动入口，默认调用 `chronoglass.app.main()`
+
+如果后续继续扩展功能，建议优先把新逻辑放进 `chronoglass/` 包，而不是重新堆回入口文件。
+
 ## 打包说明
 
 项目提供了 Windows 构建脚本 `build.bat`。脚本会执行以下流程：
@@ -192,7 +207,13 @@ build.bat
 
 ## 项目结构
 
-- `ChronoGlass.py`：主程序源码
+- `ChronoGlass.py`：程序入口文件
+- `chronoglass/__init__.py`：包导出
+- `chronoglass/app.py`：主窗口与应用入口
+- `chronoglass/dialogs.py`：各类对话框
+- `chronoglass/state.py`：状态存储与日志逻辑
+- `chronoglass/widgets.py`：自定义控件
+- `chronoglass/common.py`：公共常量与路径工具
 - `build.bat`：构建与签名脚本
 - `tray_icon.ico` / `tray_icon.png`：程序图标资源
 - `mycert.pfx`：签名证书
