@@ -7,6 +7,7 @@ import traceback
 import urllib.request
 import urllib.parse
 import threading
+import html
 from enum import IntEnum
 
 try:
@@ -19,16 +20,19 @@ except ImportError:
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QMenu, QInputDialog, QSystemTrayIcon, QHBoxLayout, QPushButton, QFrame,
                              QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-                             QSpinBox, QLineEdit, QFormLayout, QComboBox)
+                             QSpinBox, QLineEdit, QFormLayout, QComboBox, QFileDialog,
+                             QStackedWidget)
 from PyQt6.QtCore import QTimer, QTime, Qt, QPoint, QDateTime, pyqtSignal, QPropertyAnimation, pyqtProperty, \
     QEasingCurve
-from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush
+from PyQt6.QtGui import QFont, QAction, QIcon, QPainter, QColor, QBrush, QPixmap, QMovie
 
 
 STATE_FILE_NAME = "chronoglass_state.json"
 LEGACY_ALARMS_FILE_NAME = "alarms.json"
 LEGACY_CONFIG_FILE_NAME = "config.json"
 STATE_LOCK = threading.RLock()
+AMBITION_TIME_FORMAT = "HH:mm:ss"
+AMBITION_LEGACY_DATETIME_FORMAT = "yyyy-MM-dd HH:mm:ss"
 
 
 def resource_path(relative_path):
@@ -128,10 +132,55 @@ def deserialize_alarm(record):
     })
 
 
+def default_ambition_config():
+    target_time = QTime.currentTime().addSecs(3600)
+    return {
+        "title": "生活的小确幸",
+        "target_time": target_time.toString(AMBITION_TIME_FORMAT),
+        "image_path": ""
+    }
+
+
+def normalize_ambition_config(record):
+    ambition = default_ambition_config()
+    if not isinstance(record, dict):
+        return ambition
+
+    title = record.get("title")
+    if isinstance(title, str) and title.strip():
+        ambition["title"] = title.strip()
+
+    target_time = record.get("target_time")
+    if isinstance(target_time, str):
+        raw_target_time = target_time.strip()
+        parsed_time = QTime.fromString(raw_target_time, AMBITION_TIME_FORMAT)
+        if parsed_time.isValid():
+            ambition["target_time"] = parsed_time.toString(AMBITION_TIME_FORMAT)
+        else:
+            parsed_dt = QDateTime.fromString(raw_target_time, AMBITION_LEGACY_DATETIME_FORMAT)
+            if parsed_dt.isValid():
+                ambition["target_time"] = parsed_dt.time().toString(AMBITION_TIME_FORMAT)
+
+    image_path = record.get("image_path")
+    if isinstance(image_path, str):
+        ambition["image_path"] = image_path.strip()
+
+    return ambition
+
+
+def normalize_config(record):
+    config = dict(record) if isinstance(record, dict) else {}
+
+    location = config.get("location", "")
+    config["location"] = location.strip() if isinstance(location, str) else ""
+    config["ambition"] = normalize_ambition_config(config.get("ambition"))
+    return config
+
+
 def default_state():
     return {
         "version": 1,
-        "config": {},
+        "config": normalize_config({}),
         "alarms": []
     }
 
@@ -145,9 +194,7 @@ def normalize_state(record):
     if isinstance(version, int):
         state["version"] = version
 
-    config = record.get("config")
-    if isinstance(config, dict):
-        state["config"] = dict(config)
+    state["config"] = normalize_config(record.get("config"))
 
     alarms = record.get("alarms")
     if isinstance(alarms, list):
@@ -227,13 +274,13 @@ def save_alarms(alarms):
 
 def load_config():
     """读取程序通用配置（如地理位置）"""
-    return load_state()["config"]
+    return normalize_config(load_state()["config"])
 
 
 def save_config(config):
     """保存程序通用配置"""
     state = load_state()
-    state["config"] = dict(config)
+    state["config"] = normalize_config(config)
     save_state(state)
 
 
@@ -769,18 +816,183 @@ class AlarmTriggerDialog(QDialog):
         super().keyPressEvent(event)
 
 
+class AmbitionEditDialog(QDialog):
+    def __init__(self, ambition_config, parent=None):
+        super().__init__(parent)
+        self.ambition_config = normalize_ambition_config(ambition_config)
+        self.setWindowTitle("修改倒计时")
+        self.setModal(True)
+        self.setMinimumWidth(460)
+        self.setStyleSheet("""
+            QDialog { background-color: #2e3440; color: #d8dee9; }
+            QLabel { color: #d8dee9; font-family: 'Microsoft YaHei'; }
+            QLineEdit {
+                background-color: #3b4252;
+                color: #eceff4;
+                border: 1px solid #4c566a;
+                border-radius: 6px;
+                padding: 8px 10px;
+                font-family: 'Microsoft YaHei';
+            }
+            QPushButton {
+                background-color: #5e81ac;
+                color: #eceff4;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-family: 'Microsoft YaHei';
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #81a1c1; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        form.setSpacing(12)
+
+        self.title_edit = QLineEdit(self.ambition_config["title"])
+        self.title_edit.setPlaceholderText("输入倒计时标题")
+        form.addRow("标题", self.title_edit)
+
+        target_time = QTime.fromString(self.ambition_config["target_time"], AMBITION_TIME_FORMAT)
+        if not target_time.isValid():
+            target_time = QTime.currentTime().addSecs(3600)
+
+        self.spin_h = CustomSpinBox()
+        self.spin_h.setRange(0, 23)
+        self.spin_h.setValue(target_time.hour())
+
+        self.spin_m = CustomSpinBox()
+        self.spin_m.setRange(0, 59)
+        self.spin_m.setValue(target_time.minute())
+
+        self.spin_s = CustomSpinBox()
+        self.spin_s.setRange(0, 59)
+        self.spin_s.setValue(target_time.second())
+
+        time_layout = QHBoxLayout()
+        time_layout.addWidget(self.spin_h)
+        time_layout.addWidget(QLabel(":"))
+        time_layout.addWidget(self.spin_m)
+        time_layout.addWidget(QLabel(":"))
+        time_layout.addWidget(self.spin_s)
+        form.addRow("时间(24小时制)", time_layout)
+
+        image_row = QHBoxLayout()
+        image_row.setSpacing(8)
+
+        self.image_edit = QLineEdit(self.ambition_config["image_path"])
+        self.image_edit.setReadOnly(True)
+        self.image_edit.setPlaceholderText("支持 PNG / JPG / WEBP / GIF")
+        image_row.addWidget(self.image_edit, 1)
+
+        browse_btn = QPushButton("上传图片")
+        browse_btn.clicked.connect(self.select_image)
+        image_row.addWidget(browse_btn)
+
+        clear_btn = QPushButton("清空")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4c566a;
+                color: #eceff4;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-family: 'Microsoft YaHei';
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #616e88; }
+        """)
+        clear_btn.clicked.connect(self.image_edit.clear)
+        image_row.addWidget(clear_btn)
+
+        image_widget = QWidget()
+        image_widget.setLayout(image_row)
+        form.addRow("图片", image_widget)
+
+        layout.addLayout(form)
+
+        hint_label = QLabel("右侧图片支持 GIF 动图；时间将按 HH:mm:ss 保存。")
+        hint_label.setWordWrap(True)
+        hint_label.setStyleSheet("color: #81a1c1;")
+        layout.addWidget(hint_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4c566a;
+                color: #eceff4;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-family: 'Microsoft YaHei';
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #616e88; }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        save_btn = QPushButton("保存")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #a3be8c;
+                color: #2e3440;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-family: 'Microsoft YaHei';
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #b8d29f; }
+        """)
+        save_btn.clicked.connect(self.accept)
+        btn_row.addWidget(save_btn)
+
+        layout.addLayout(btn_row)
+
+    def select_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择图片",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"
+        )
+        if file_path:
+            self.image_edit.setText(file_path)
+
+    def get_values(self):
+        return normalize_ambition_config({
+            "title": self.title_edit.text().strip() or "新的倒计时",
+            "target_time": QTime(
+                self.spin_h.value(),
+                self.spin_m.value(),
+                self.spin_s.value()
+            ).toString(AMBITION_TIME_FORMAT),
+            "image_path": self.image_edit.text().strip()
+        })
+
+
 class AppMode(IntEnum):
     CLOCK = 0
-    COUNTDOWN = 1
-    STOPWATCH = 2
-    ALARM = 3
+    AMBITION = 1
+    COUNTDOWN = 2
+    STOPWATCH = 3
+    ALARM = 4
 
 
 class ChronoGlass(QWidget):
     # 【核心改动：天气更新信号】
     weather_updated = pyqtSignal(str)
     WINDOW_WIDTH = 450
-    WINDOW_HEIGHT = 210
+    WINDOW_HEIGHT = 225
 
     def __init__(self):
         super().__init__()
@@ -796,11 +1008,14 @@ class ChronoGlass(QWidget):
         # 【核心改动：读取配置信息】
         self.config = load_config()
         self.location = self.config.get("location", "")
+        self.ambition_config = normalize_ambition_config(self.config.get("ambition"))
         self.weather_info = ""
         self.weather_fetch_inflight = False
         self.weather_lock = threading.Lock()
         self.cached_clock_info_date = None
         self.cached_clock_info_html = ""
+        self.ambition_movie = None
+        self.loaded_ambition_image_path = None
 
         # 绑定天气更新槽函数
         self.weather_updated.connect(self.on_weather_updated)
@@ -829,6 +1044,7 @@ class ChronoGlass(QWidget):
 
         # 【核心改动 2：调用全局变量控制窗口尺寸】
         self.setMinimumSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
+        self.resize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
 
         self.main_frame = QFrame(self)
         self.main_frame.setObjectName("MainFrame")
@@ -881,12 +1097,14 @@ class ChronoGlass(QWidget):
 
         frame_layout.addLayout(top_bar)
 
-        self.label = QLabel()
-        self.label.setMinimumHeight(100)
-        self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        frame_layout.addWidget(self.label)
+        self.content_stack = QStackedWidget()
+        self.content_stack.setStyleSheet("background: transparent; border: none;")
+        self.content_stack.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.text_page = self.build_text_page()
+        self.ambition_page = self.build_ambition_page()
+        self.content_stack.addWidget(self.text_page)
+        self.content_stack.addWidget(self.ambition_page)
+        frame_layout.addWidget(self.content_stack, 1)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -894,6 +1112,124 @@ class ChronoGlass(QWidget):
 
         self.refresh_display()
         self.show()
+
+    def build_text_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 6, 18, 18)
+        layout.setSpacing(0)
+
+        layout.addStretch()
+
+        self.label = QLabel()
+        self.label.setMinimumHeight(150)
+        self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.addWidget(self.label)
+
+        layout.addStretch()
+        return page
+
+    def build_ambition_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 8, 18, 18)
+        layout.setSpacing(0)
+
+        self.ambition_card = QFrame()
+        self.ambition_card.setObjectName("AmbitionCard")
+        self.ambition_card.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.ambition_card.setStyleSheet("""
+            QFrame#AmbitionCard {
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 rgba(94, 129, 172, 210),
+                    stop: 0.5 rgba(46, 52, 64, 235),
+                    stop: 1 rgba(191, 97, 106, 205)
+                );
+                border: 1px solid rgba(236, 239, 244, 45);
+                border-radius: 18px;
+            }
+            QLabel#AmbitionTitle {
+                color: #eceff4;
+                font-family: 'Microsoft YaHei';
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QLabel#AmbitionCountdown {
+                color: #ebcb8b;
+                font-family: 'Consolas';
+                font-size: 36px;
+                font-weight: bold;
+            }
+            QLabel#AmbitionFestival {
+                color: #eceff4;
+                font-family: 'Microsoft YaHei';
+                font-size: 10pt;
+                font-weight: bold;
+                background: rgba(46, 52, 64, 70);
+                border: 1px solid rgba(236, 239, 244, 35);
+                border-radius: 14px;
+                padding: 12px 14px;
+            }
+            QLabel#AmbitionImage {
+                background: rgba(46, 52, 64, 95);
+                border: 1px solid rgba(236, 239, 244, 55);
+                border-radius: 16px;
+                color: rgba(236, 239, 244, 0.82);
+                font-family: 'Microsoft YaHei';
+                font-size: 10pt;
+            }
+        """)
+        layout.addWidget(self.ambition_card)
+
+        card_layout = QHBoxLayout(self.ambition_card)
+        card_layout.setContentsMargins(22, 8, 18, 12)
+        card_layout.setSpacing(16)
+
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(2)
+
+        self.ambition_title_label = QLabel()
+        self.ambition_title_label.setObjectName("AmbitionTitle")
+        self.ambition_title_label.setWordWrap(True)
+        self.ambition_title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        left_layout.addWidget(self.ambition_title_label)
+
+        self.ambition_countdown_label = QLabel()
+        self.ambition_countdown_label.setObjectName("AmbitionCountdown")
+        self.ambition_countdown_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        left_layout.addWidget(self.ambition_countdown_label)
+
+        left_layout.addStretch()
+
+        self.ambition_festival_label = QLabel()
+        self.ambition_festival_label.setObjectName("AmbitionFestival")
+        self.ambition_festival_label.setWordWrap(True)
+        self.ambition_festival_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ambition_festival_label.setFixedWidth(82)
+        self.ambition_festival_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        left_layout.addWidget(self.ambition_festival_label)
+
+        card_layout.addLayout(left_layout, 3)
+
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addStretch()
+
+        self.ambition_image_label = QLabel("上传图片后显示在这里\n支持 GIF")
+        self.ambition_image_label.setObjectName("AmbitionImage")
+        self.ambition_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ambition_image_label.setFixedSize(120, 120)
+        self.ambition_image_label.setWordWrap(True)
+        self.ambition_image_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        right_layout.addWidget(self.ambition_image_label)
+
+        right_layout.addStretch()
+        card_layout.addLayout(right_layout, 2)
+
+        return page
 
     def create_tray(self):
         self.tray = QSystemTrayIcon(self)
@@ -909,12 +1245,14 @@ class ChronoGlass(QWidget):
 
         m0_act = QAction("🕒 系统时钟", self)
         m0_act.triggered.connect(lambda: self.switch_mode(AppMode.CLOCK))
-        m1_act = QAction("⏳ 倒计时模式", self)
-        m1_act.triggered.connect(lambda: self.switch_mode(AppMode.COUNTDOWN))
-        m2_act = QAction("⏱️ 秒表计时", self)
-        m2_act.triggered.connect(lambda: self.switch_mode(AppMode.STOPWATCH))
-        m3_act = QAction("⏰ 闹钟", self)
-        m3_act.triggered.connect(lambda: self.switch_mode(AppMode.ALARM))
+        m1_act = QAction("🎯 生活的小确幸", self)
+        m1_act.triggered.connect(lambda: self.switch_mode(AppMode.AMBITION))
+        m2_act = QAction("⏳ 倒计时模式", self)
+        m2_act.triggered.connect(lambda: self.switch_mode(AppMode.COUNTDOWN))
+        m3_act = QAction("⏱️ 秒表计时", self)
+        m3_act.triggered.connect(lambda: self.switch_mode(AppMode.STOPWATCH))
+        m4_act = QAction("⏰ 闹钟", self)
+        m4_act.triggered.connect(lambda: self.switch_mode(AppMode.ALARM))
         reset_act = QAction("🔄 重置当前计时", self)
         reset_act.triggered.connect(self.reset_timer)
         settings_act = QAction("⚙️ 闹钟设置", self)
@@ -926,6 +1264,7 @@ class ChronoGlass(QWidget):
         menu.addAction(m1_act)
         menu.addAction(m2_act)
         menu.addAction(m3_act)
+        menu.addAction(m4_act)
         menu.addSeparator()
         menu.addAction(reset_act)
         menu.addAction(settings_act)
@@ -947,10 +1286,10 @@ class ChronoGlass(QWidget):
 
     def update_style(self, color, mode_text):
         self.main_frame.setStyleSheet(
-            f"QFrame#MainFrame {{ background-color: rgba(46, 52, 64, 235); border: 2px solid {color}; border-radius: 20px; }}")
+            f"QFrame#MainFrame {{ background-color: rgba(46, 52, 64, 235); border: 2px solid {color}; border-radius: 20px; }}"
+        )
         self.mode_label.setStyleSheet(f"color: {color}; background: transparent;")
         self.mode_label.setText(mode_text)
-
         self.close_btn.setStyleSheet(f"""
             QPushButton {{ color: #bf616a; background: rgba(191, 97, 106, 15); border: none; border-bottom: 2px solid #bf616a; font-size: 18px; font-weight: bold; }}
             QPushButton:hover {{ background: rgba(191, 97, 106, 40); color: #d8dee9; border-bottom: 3px solid #d8dee9; }}
@@ -966,8 +1305,7 @@ class ChronoGlass(QWidget):
                 loc, ok = QInputDialog.getText(self, "设定", "输入所在地获取天气(如: 北京):", text=self.location)
                 if ok:
                     self.location = loc.strip()
-                    self.config["location"] = self.location
-                    save_config(self.config)
+                    self.save_current_config()
                     self.cached_clock_info_date = None
                     if self.location:
                         self.weather_info = "获取中..."
@@ -988,6 +1326,10 @@ class ChronoGlass(QWidget):
         super().wheelEvent(event)
 
     def contextMenuEvent(self, event):
+        if self.mode == AppMode.AMBITION:
+            self.open_ambition_editor()
+            event.accept()
+            return
         self.tray.contextMenu().exec(event.globalPos())
 
     def set_custom_time(self):
@@ -1004,7 +1346,7 @@ class ChronoGlass(QWidget):
         dlg.exec()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Space and self.mode != AppMode.CLOCK:
+        if event.key() == Qt.Key.Key_Space and self.mode in (AppMode.COUNTDOWN, AppMode.STOPWATCH):
             self.is_running = not self.is_running
             self.refresh_display()
         else:
@@ -1019,6 +1361,78 @@ class ChronoGlass(QWidget):
         if event.buttons() & Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self.drag_position)
             event.accept()
+
+    def save_current_config(self):
+        self.config["location"] = self.location
+        self.config["ambition"] = normalize_ambition_config(self.ambition_config)
+        save_config(self.config)
+
+    def open_ambition_editor(self):
+        dlg = AmbitionEditDialog(self.ambition_config, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.ambition_config = dlg.get_values()
+            self.loaded_ambition_image_path = None
+            self.save_current_config()
+            self.refresh_display()
+
+    def get_ambition_target_time(self):
+        target_time = QTime.fromString(self.ambition_config.get("target_time", ""), AMBITION_TIME_FORMAT)
+        if target_time.isValid():
+            return target_time
+        return QTime.currentTime().addSecs(3600)
+
+    def format_ambition_countdown(self, seconds):
+        total_seconds = max(abs(seconds), 0)
+        days, rem = divmod(total_seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+        if days > 0:
+            return f"{days}天 {hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def update_ambition_image(self, force=False):
+        image_path = self.ambition_config.get("image_path", "")
+
+        if not force and image_path == self.loaded_ambition_image_path:
+            return
+
+        if self.ambition_movie is not None:
+            self.ambition_movie.stop()
+            self.ambition_movie = None
+
+        self.loaded_ambition_image_path = image_path
+        self.ambition_image_label.clear()
+        self.ambition_image_label.setText("上传图片后显示在这里\n支持 GIF")
+
+        if not image_path:
+            return
+
+        if not os.path.exists(image_path):
+            self.ambition_image_label.setText("图片不存在\n右键重新上传")
+            return
+
+        if image_path.lower().endswith(".gif"):
+            movie = QMovie(image_path)
+            if movie.isValid():
+                movie.setScaledSize(self.ambition_image_label.size())
+                self.ambition_movie = movie
+                self.ambition_image_label.setMovie(movie)
+                movie.start()
+                return
+            self.ambition_image_label.setText("GIF 加载失败")
+            return
+
+        pixmap = QPixmap(image_path)
+        if pixmap.isNull():
+            self.ambition_image_label.setText("图片加载失败")
+            return
+
+        scaled = pixmap.scaled(
+            self.ambition_image_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.ambition_image_label.setPixmap(scaled)
 
     # 【核心改动：在独立线程请求天气，防卡死】
     def fetch_weather(self):
@@ -1109,6 +1523,39 @@ class ChronoGlass(QWidget):
         offset = (target_date - today).days
         return jieqi.getName(), max(offset, 0)
 
+    def update_ambition_display(self):
+        target_time = self.get_ambition_target_time()
+        seconds = QTime.currentTime().secsTo(target_time)
+        title = self.ambition_config.get("title", "生活的小确幸").strip() or "生活的小确幸"
+
+        if seconds > 0:
+            self.ambition_title_label.setText(title)
+            self.ambition_countdown_label.setText(self.format_ambition_countdown(seconds))
+            self.ambition_countdown_label.setStyleSheet(
+                "color: #ebcb8b; font-family: 'Consolas'; font-size: 48px; font-weight: bold;"
+            )
+        else:
+            self.ambition_title_label.setText("恭喜")
+            self.ambition_countdown_label.setText(title)
+            self.ambition_countdown_label.setStyleSheet(
+                "color: #a3be8c; font-family: 'Microsoft YaHei'; font-size: 28px; font-weight: bold;"
+            )
+
+        if HAS_LUNAR:
+            festival_name, festival_days = self.get_next_festival_info(datetime.date.today())
+            festival_display = self.truncate_display_text(festival_name, 4)
+            if festival_days is None:
+                badge_text = f"{festival_display}\n待定"
+            elif festival_days <= 0:
+                badge_text = f"{festival_display}\n今天"
+            else:
+                badge_text = f"{festival_display}\n{festival_days}天"
+            self.ambition_festival_label.setText(badge_text)
+        else:
+            self.ambition_festival_label.setText("节日\n待启用")
+
+        self.update_ambition_image()
+
     def get_clock_info_html(self, now):
         today = now.date()
         if self.cached_clock_info_date == today and self.cached_clock_info_html:
@@ -1118,24 +1565,29 @@ class ChronoGlass(QWidget):
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         week_str = weekdays[now.weekday()]
 
-        weather_str = f" &nbsp;|&nbsp; {self.location} {self.weather_info}" if self.location else " &nbsp;|&nbsp; 双击添加天气"
+        location_text = html.escape(self.location)
+        weather_text = html.escape(self.weather_info)
+        weather_str = (
+            f" &nbsp;|&nbsp; {location_text} {weather_text}".rstrip()
+            if self.location else
+            " &nbsp;|&nbsp; 双击添加天气"
+        )
         line1_str = f"{date_str} {week_str}{weather_str}"
 
         if HAS_LUNAR:
             lunar = Lunar.fromDate(now)
-            festival_name, festival_days = self.get_next_festival_info(today)
             jieqi_name, jieqi_days = self.get_next_jieqi_info(lunar, today)
-            lunar_date_str = f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
-            yi = " ".join(lunar.getDayYi()[:2]) or "无"
-            ji = " ".join(lunar.getDayJi()[:2]) or "无"
-            festival_display = self.truncate_display_text(festival_name)
+            lunar_date_str = html.escape(f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}")
+            jieqi_display = html.escape(jieqi_name)
+            yi = html.escape(" ".join(lunar.getDayYi()[:4]) or "无")
+            ji = html.escape(" ".join(lunar.getDayJi()[:4]) or "无")
 
             line2_str = (
-                f"下个节日: {festival_display}({self.format_days_until(festival_days)})"
-                f" &nbsp;|&nbsp; 最近节气: {jieqi_name}({self.format_days_until(jieqi_days)})"
+                f"{lunar_date_str}"
+                f" &nbsp;|&nbsp; 最近节气: {jieqi_display}({self.format_days_until(jieqi_days)})"
             )
-            line3_str = f"{lunar_date_str} &nbsp;|&nbsp; 宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
-            info_str = f"{line1_str}<br>{line2_str}<br>{line3_str}"
+            line3_str = f"宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
+            info_str = "<br>".join([line1_str, line2_str, line3_str])
         else:
             info_str = f"{line1_str}<br><span style='font-size: 9pt;'>(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
 
@@ -1202,17 +1654,24 @@ class ChronoGlass(QWidget):
 
     def refresh_display(self):
         if self.mode == AppMode.CLOCK:
+            self.content_stack.setCurrentWidget(self.text_page)
             time_str = QTime.currentTime().toString("HH:mm:ss")
             now = datetime.datetime.now()
             info_str = self.get_clock_info_html(now)
 
-            # 加上 line-height: 1.4 让三行文字看起来不会太拥挤
+            # 加上 line-height: 1.4 让多行文字看起来不会太拥挤
             html = f"""<span style="font-family: Consolas; font-size: 52pt; font-weight: bold;">{time_str}</span><br>
          <span style="font-family: 'Microsoft YaHei'; font-size: 11pt; font-weight: normal; line-height: 1.4;">{info_str}</span>"""
             self.label.setText(html)
             self.update_style("#88c0d0", "系统时钟")
 
+        elif self.mode == AppMode.AMBITION:
+            self.content_stack.setCurrentWidget(self.ambition_page)
+            self.update_ambition_display()
+            self.update_style("#ebcb8b", "生活的小确幸")
+
         elif self.mode == AppMode.COUNTDOWN:
+            self.content_stack.setCurrentWidget(self.text_page)
             self.label.setText(self.format_time(self.remaining_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             if self.remaining_seconds == 0:
@@ -1223,6 +1682,7 @@ class ChronoGlass(QWidget):
                 self.update_style("#a3be8c", "倒计时已暂停")
 
         elif self.mode == AppMode.STOPWATCH:
+            self.content_stack.setCurrentWidget(self.text_page)
             self.label.setText(self.format_time(self.elapsed_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             if self.is_running:
@@ -1231,6 +1691,7 @@ class ChronoGlass(QWidget):
                 self.update_style("#d8dee9", "计时已暂停")
 
         elif self.mode == AppMode.ALARM:
+            self.content_stack.setCurrentWidget(self.text_page)
             self.label.setFont(QFont("Microsoft YaHei", 24, QFont.Weight.Bold))
             count = len(self.alarms)
             enabled_count = sum(1 for a in self.alarms if a["enabled"])
@@ -1243,7 +1704,7 @@ class ChronoGlass(QWidget):
         return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
 
     def switch_mode(self, mode_idx):
-        self.mode = mode_idx
+        self.mode = AppMode(mode_idx)
         self.is_running = False
         self.refresh_display()
 
