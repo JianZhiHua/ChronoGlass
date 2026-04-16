@@ -1,3 +1,5 @@
+import os
+
 from PyQt6.QtCore import QDateTime, QTime, QTimer, Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
@@ -561,14 +563,22 @@ class AmbitionEditDialog(QDialog):
         layout.addLayout(btn_row)
 
     def select_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择图片",
-            "",
-            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)",
-        )
-        if file_path:
-            self.image_edit.setText(file_path)
+        current_path = self.image_edit.text().strip()
+
+        dialog = QFileDialog(self, "选择图片")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        dialog.setNameFilter("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)")
+        # 打包后禁用原生文件对话框，避免部分系统环境下选完文件直接崩溃。
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+
+        if current_path and os.path.exists(current_path):
+            dialog.setDirectory(os.path.dirname(current_path))
+            dialog.selectFile(current_path)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                self.image_edit.setText(selected_files[0])
 
     def get_values(self):
         return normalize_ambition_config(

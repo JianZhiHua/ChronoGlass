@@ -18,7 +18,7 @@ except ImportError:
     HAS_LUNAR = False
 
 from PyQt6.QtCore import QPoint, QTime, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QIcon, QMovie, QPixmap
+from PyQt6.QtGui import QAction, QFont, QIcon, QImageReader, QMovie, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QSystemTrayIcon,
@@ -441,10 +442,19 @@ class ChronoGlass(QWidget):
     def open_ambition_editor(self):
         dlg = AmbitionEditDialog(self.ambition_config, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
+            previous_config = dict(self.ambition_config)
             self.ambition_config = dlg.get_values()
             self.loaded_ambition_image_path = None
             self.save_current_config()
-            self.refresh_display()
+            try:
+                self.refresh_display()
+            except Exception as exc:
+                log_error("目标图片刷新失败", exc)
+                self.ambition_config = previous_config
+                self.loaded_ambition_image_path = None
+                self.save_current_config()
+                self.refresh_display()
+                QMessageBox.warning(self, "图片加载失败", "选中的文件无法预览，请换一张图片再试。")
 
     def get_ambition_target_time(self):
         target_time = QTime.fromString(self.ambition_config.get("target_time", ""), AMBITION_TIME_FORMAT)
@@ -462,7 +472,9 @@ class ChronoGlass(QWidget):
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
     def update_ambition_image(self, force=False):
-        image_path = self.ambition_config.get("image_path", "")
+        image_path = self.ambition_config.get("image_path", "").strip()
+        if image_path:
+            image_path = os.path.abspath(image_path)
         if not force and image_path == self.loaded_ambition_image_path:
             return
 
@@ -488,12 +500,23 @@ class ChronoGlass(QWidget):
                 self.ambition_image_label.setMovie(movie)
                 movie.start()
                 return
-            self.ambition_image_label.setText("GIF 加载失败")
+        reader = QImageReader(image_path)
+        reader.setAutoTransform(True)
+        if not reader.canRead():
+            self.ambition_image_label.setText("图片格式不受支持")
+            log_error(f"图片加载失败: {image_path}")
             return
 
-        pixmap = QPixmap(image_path)
-        if pixmap.isNull():
+        image = reader.read()
+        if image.isNull():
             self.ambition_image_label.setText("图片加载失败")
+            log_error(f"图片读取失败: {image_path}")
+            return
+
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull():
+            self.ambition_image_label.setText("图片转换失败")
+            log_error(f"图片转换失败: {image_path}")
             return
 
         scaled = pixmap.scaled(

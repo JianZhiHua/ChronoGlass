@@ -59,8 +59,17 @@ if "%HEALTH_CHECK%"=="FAIL" (
 echo.
 echo [准备] 环境检查无误，正在清理旧的 out 目录...
 if exist "out" (
-    rd /s /q "out"
-    echo    -^> 旧目录已强制删除。
+    set "OUT_JSON_BACKUP=%PROJECT_DIR%\.out_json_backup"
+    if exist "!OUT_JSON_BACKUP!" rd /s /q "!OUT_JSON_BACKUP!"
+    md "!OUT_JSON_BACKUP!" >nul
+    move /y "out\*.json" "!OUT_JSON_BACKUP!" >nul 2>nul
+    pushd "out"
+    for /d %%D in (*) do rd /s /q "%%D" >nul 2>nul
+    del /f /q * >nul 2>nul
+    popd
+    move /y "!OUT_JSON_BACKUP!\*.json" "out" >nul 2>nul
+    rd /s /q "!OUT_JSON_BACKUP!" >nul 2>nul
+    echo    -^> 已清理旧内容，并保留 out 根目录下的 .json 文件。
 ) else (
     echo    -^> 目录已是洁净状态。
 )
