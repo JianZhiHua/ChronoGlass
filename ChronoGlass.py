@@ -1171,7 +1171,7 @@ class ChronoGlass(QWidget):
                 background: rgba(46, 52, 64, 70);
                 border: 1px solid rgba(236, 239, 244, 35);
                 border-radius: 14px;
-                padding: 12px 14px;
+                padding: 10px 12px;
             }
             QLabel#AmbitionImage {
                 background: rgba(46, 52, 64, 95);
