@@ -14,9 +14,6 @@
 - 可选农历扩展：安装 `lunar-python` 后显示农历、节气、节日和宜忌
 - 纯代码 UI 控件：自绘开关、自定义步进器，降低打包后资源缺失风险
 
-## 页面截图
-<img src="https://drive.google.com/file/d/1NzdBPZ-aasNF1NlWBxR3ern0eM_ys7Sx/preview"></img>
-
 ## 模式说明
 
 ### 1. 系统时钟
