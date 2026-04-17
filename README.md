@@ -15,12 +15,7 @@
 - 纯代码 UI 控件：自绘开关、自定义步进器，降低打包后资源缺失风险
 
 ## 页面截图
-![系统时钟](https://drive.google.com/file/d/1NzdBPZ-aasNF1NlWBxR3ern0eM_ys7Sx/view?usp=sharing)
-![每日倒计时][1776391121310]
-![倒计时][1776391171040]
-![计时][1776391184374]
-![闹钟][1776391202309]
-![闹钟页面][1776391243656]
+<img src="https://drive.google.com/u/0/drive-viewer/AKGpihZoWWJzCwBaDz_66GLcZVR-yyiIwokRiaL6lUk1tP3EwhTWRffKxDhaX7t6sg_ovl7Dr9b-6iO3hlpDtUSlQpEWUqCXb9hGmqQ" alt="系统时钟">
 
 ## 模式说明
 
