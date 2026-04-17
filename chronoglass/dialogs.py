@@ -483,10 +483,10 @@ class AmbitionEditDialog(QDialog):
         image_row = QHBoxLayout()
         image_row.setSpacing(8)
 
-        self.image_edit = QLineEdit(self.ambition_config["image_path"])
-        self.image_edit.setReadOnly(True)
-        self.image_edit.setPlaceholderText("支持 PNG / JPG / WEBP / GIF")
-        image_row.addWidget(self.image_edit, 1)
+        self.pending_image_edit = QLineEdit(self.ambition_config["image_path"])
+        self.pending_image_edit.setReadOnly(True)
+        self.pending_image_edit.setPlaceholderText("支持 PNG / JPG / WEBP / GIF")
+        image_row.addWidget(self.pending_image_edit, 1)
 
         browse_btn = QPushButton("上传图片")
         browse_btn.clicked.connect(self.select_image)
@@ -507,16 +507,52 @@ class AmbitionEditDialog(QDialog):
             QPushButton:hover { background-color: #616e88; }
             """
         )
-        clear_btn.clicked.connect(self.image_edit.clear)
+        clear_btn.clicked.connect(self.pending_image_edit.clear)
         image_row.addWidget(clear_btn)
 
         image_widget = QWidget()
         image_widget.setLayout(image_row)
-        form.addRow("图片", image_widget)
+        form.addRow("倒计时图片", image_widget)
+
+        completed_image_row = QHBoxLayout()
+        completed_image_row.setSpacing(8)
+
+        self.completed_image_edit = QLineEdit(self.ambition_config["completed_image_path"])
+        self.completed_image_edit.setReadOnly(True)
+        self.completed_image_edit.setPlaceholderText("支持 PNG / JPG / WEBP / GIF")
+        completed_image_row.addWidget(self.completed_image_edit, 1)
+
+        completed_browse_btn = QPushButton("上传图片")
+        completed_browse_btn.clicked.connect(self.select_completed_image)
+        completed_image_row.addWidget(completed_browse_btn)
+
+        completed_clear_btn = QPushButton("清空")
+        completed_clear_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #4c566a;
+                color: #eceff4;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-family: 'Microsoft YaHei';
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #616e88; }
+            """
+        )
+        completed_clear_btn.clicked.connect(self.completed_image_edit.clear)
+        completed_image_row.addWidget(completed_clear_btn)
+
+        completed_image_widget = QWidget()
+        completed_image_widget.setLayout(completed_image_row)
+        form.addRow("完成后图片", completed_image_widget)
 
         layout.addLayout(form)
 
-        hint_label = QLabel("右侧图片支持 GIF 动图；时间将按 HH:mm:ss 保存。")
+        hint_label = QLabel(
+            "倒计时中显示标题和第一张图；结束后标题位显示“恭喜”，大文本位显示原标题，并优先显示第二张图。若未设置第二张图，则继续显示第一张图。时间按 HH:mm:ss 保存。"
+        )
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet("color: #81a1c1;")
         layout.addWidget(hint_label)
@@ -563,7 +599,13 @@ class AmbitionEditDialog(QDialog):
         layout.addLayout(btn_row)
 
     def select_image(self):
-        current_path = self.image_edit.text().strip()
+        self.select_image_for(self.pending_image_edit)
+
+    def select_completed_image(self):
+        self.select_image_for(self.completed_image_edit)
+
+    def select_image_for(self, target_edit):
+        current_path = target_edit.text().strip()
 
         dialog = QFileDialog(self, "选择图片")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -578,7 +620,7 @@ class AmbitionEditDialog(QDialog):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             selected_files = dialog.selectedFiles()
             if selected_files:
-                self.image_edit.setText(selected_files[0])
+                target_edit.setText(selected_files[0])
 
     def get_values(self):
         return normalize_ambition_config(
@@ -589,6 +631,7 @@ class AmbitionEditDialog(QDialog):
                     self.spin_m.value(),
                     self.spin_s.value(),
                 ).toString(AMBITION_TIME_FORMAT),
-                "image_path": self.image_edit.text().strip(),
+                "image_path": self.pending_image_edit.text().strip(),
+                "completed_image_path": self.completed_image_edit.text().strip(),
             }
         )

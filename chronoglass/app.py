@@ -256,12 +256,17 @@ class ChronoGlass(QWidget):
 
         self.ambition_title_label = QLabel()
         self.ambition_title_label.setObjectName("AmbitionTitle")
+        self.ambition_title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.ambition_title_label.setMinimumHeight(40)
         self.ambition_title_label.setWordWrap(True)
         self.ambition_title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         left_layout.addWidget(self.ambition_title_label)
 
         self.ambition_countdown_label = QLabel()
         self.ambition_countdown_label.setObjectName("AmbitionCountdown")
+        self.ambition_countdown_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.ambition_countdown_label.setMinimumHeight(64)
+        self.ambition_countdown_label.setWordWrap(True)
         self.ambition_countdown_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         left_layout.addWidget(self.ambition_countdown_label)
 
@@ -463,7 +468,7 @@ class ChronoGlass(QWidget):
         return QTime.currentTime().addSecs(3600)
 
     def format_ambition_countdown(self, seconds):
-        total_seconds = max(abs(seconds), 0)
+        total_seconds = max(seconds, 0)
         days, rem = divmod(total_seconds, 86400)
         hours, rem = divmod(rem, 3600)
         minutes, secs = divmod(rem, 60)
@@ -471,10 +476,16 @@ class ChronoGlass(QWidget):
             return f"{days}天 {hours:02d}:{minutes:02d}:{secs:02d}"
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def update_ambition_image(self, force=False):
+    def get_current_ambition_image_path(self, is_completed):
         image_path = self.ambition_config.get("image_path", "").strip()
-        if image_path:
-            image_path = os.path.abspath(image_path)
+        completed_image_path = self.ambition_config.get("completed_image_path", "").strip()
+        selected_path = (completed_image_path or image_path) if is_completed else image_path
+        if selected_path:
+            return os.path.abspath(selected_path)
+        return ""
+
+    def update_ambition_image(self, is_completed, force=False):
+        image_path = self.get_current_ambition_image_path(is_completed)
         if not force and image_path == self.loaded_ambition_image_path:
             return
 
@@ -610,19 +621,20 @@ class ChronoGlass(QWidget):
     def update_ambition_display(self):
         target_time = self.get_ambition_target_time()
         seconds = QTime.currentTime().secsTo(target_time)
+        is_completed = seconds <= 0
         title = self.ambition_config.get("title", "生活的小确幸").strip() or "生活的小确幸"
 
-        if seconds > 0:
-            self.ambition_title_label.setText(title)
-            self.ambition_countdown_label.setText(self.format_ambition_countdown(seconds))
-            self.ambition_countdown_label.setStyleSheet(
-                "color: #ebcb8b; font-family: 'Consolas'; font-size: 48px; font-weight: bold;"
-            )
-        else:
+        if is_completed:
             self.ambition_title_label.setText("恭喜")
             self.ambition_countdown_label.setText(title)
             self.ambition_countdown_label.setStyleSheet(
                 "color: #a3be8c; font-family: 'Microsoft YaHei'; font-size: 28px; font-weight: bold;"
+            )
+        else:
+            self.ambition_title_label.setText(title)
+            self.ambition_countdown_label.setText(self.format_ambition_countdown(seconds))
+            self.ambition_countdown_label.setStyleSheet(
+                "color: #ebcb8b; font-family: 'Consolas'; font-size: 48px; font-weight: bold;"
             )
 
         if HAS_LUNAR:
@@ -638,7 +650,7 @@ class ChronoGlass(QWidget):
         else:
             self.ambition_festival_label.setText("节日\n待启用")
 
-        self.update_ambition_image()
+        self.update_ambition_image(is_completed)
 
     def get_clock_info_html(self, now):
         today = now.date()

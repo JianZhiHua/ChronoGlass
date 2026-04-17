@@ -103,6 +103,7 @@ def default_ambition_config():
         "title": "生活的小确幸",
         "target_time": target_time.toString(AMBITION_TIME_FORMAT),
         "image_path": "",
+        "completed_image_path": "",
     }
 
 
@@ -129,6 +130,10 @@ def normalize_ambition_config(record):
     image_path = record.get("image_path")
     if isinstance(image_path, str):
         ambition["image_path"] = image_path.strip()
+
+    completed_image_path = record.get("completed_image_path")
+    if isinstance(completed_image_path, str):
+        ambition["completed_image_path"] = completed_image_path.strip()
 
     return ambition
 
