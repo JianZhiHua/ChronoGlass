@@ -456,6 +456,10 @@ class AmbitionEditDialog(QDialog):
         self.title_edit.setPlaceholderText("输入倒计时标题")
         form.addRow("标题", self.title_edit)
 
+        self.subtitle_edit = QLineEdit(self.ambition_config["subtitle"])
+        self.subtitle_edit.setPlaceholderText("输入完成后显示的标题")
+        form.addRow("完成后标题", self.subtitle_edit)
+
         target_time = QTime.fromString(self.ambition_config["target_time"], AMBITION_TIME_FORMAT)
         if not target_time.isValid():
             target_time = QTime.currentTime().addSecs(3600)
@@ -480,43 +484,21 @@ class AmbitionEditDialog(QDialog):
         time_layout.addWidget(self.spin_s)
         form.addRow("时间(24小时制)", time_layout)
 
-        image_row = QHBoxLayout()
-        image_row.setSpacing(8)
-
-        self.image_edit = QLineEdit(self.ambition_config["image_path"])
-        self.image_edit.setReadOnly(True)
-        self.image_edit.setPlaceholderText("支持 PNG / JPG / WEBP / GIF")
-        image_row.addWidget(self.image_edit, 1)
-
-        browse_btn = QPushButton("上传图片")
-        browse_btn.clicked.connect(self.select_image)
-        image_row.addWidget(browse_btn)
-
-        clear_btn = QPushButton("清空")
-        clear_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #4c566a;
-                color: #eceff4;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 14px;
-                font-family: 'Microsoft YaHei';
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #616e88; }
-            """
+        image_widget, self.image_edit = self.create_image_row(
+            self.ambition_config["image_path"],
+            self.select_primary_image,
         )
-        clear_btn.clicked.connect(self.image_edit.clear)
-        image_row.addWidget(clear_btn)
-
-        image_widget = QWidget()
-        image_widget.setLayout(image_row)
         form.addRow("图片", image_widget)
+
+        completed_image_widget, self.completed_image_edit = self.create_image_row(
+            self.ambition_config["completed_image_path"],
+            self.select_completed_image,
+        )
+        form.addRow("完成图片", completed_image_widget)
 
         layout.addLayout(form)
 
-        hint_label = QLabel("右侧图片支持 GIF 动图；时间将按 HH:mm:ss 保存。")
+        hint_label = QLabel("右侧图片支持 GIF 动图；完成后标题仅在完成后显示，可分别设置进行中和完成后的图片，时间将按 HH:mm:ss 保存。")
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet("color: #81a1c1;")
         layout.addWidget(hint_label)
@@ -562,8 +544,49 @@ class AmbitionEditDialog(QDialog):
 
         layout.addLayout(btn_row)
 
-    def select_image(self):
-        current_path = self.image_edit.text().strip()
+    def create_image_row(self, initial_path, browse_handler):
+        image_row = QHBoxLayout()
+        image_row.setSpacing(8)
+
+        image_edit = QLineEdit(initial_path)
+        image_edit.setReadOnly(True)
+        image_edit.setPlaceholderText("支持 PNG / JPG / WEBP / GIF")
+        image_row.addWidget(image_edit, 1)
+
+        browse_btn = QPushButton("上传图片")
+        browse_btn.clicked.connect(browse_handler)
+        image_row.addWidget(browse_btn)
+
+        clear_btn = QPushButton("清空")
+        clear_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #4c566a;
+                color: #eceff4;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-family: 'Microsoft YaHei';
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #616e88; }
+            """
+        )
+        clear_btn.clicked.connect(image_edit.clear)
+        image_row.addWidget(clear_btn)
+
+        image_widget = QWidget()
+        image_widget.setLayout(image_row)
+        return image_widget, image_edit
+
+    def select_primary_image(self):
+        self.select_image(self.image_edit)
+
+    def select_completed_image(self):
+        self.select_image(self.completed_image_edit)
+
+    def select_image(self, target_edit):
+        current_path = target_edit.text().strip()
 
         dialog = QFileDialog(self, "选择图片")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -578,17 +601,19 @@ class AmbitionEditDialog(QDialog):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             selected_files = dialog.selectedFiles()
             if selected_files:
-                self.image_edit.setText(selected_files[0])
+                target_edit.setText(selected_files[0])
 
     def get_values(self):
         return normalize_ambition_config(
             {
                 "title": self.title_edit.text().strip() or "新的倒计时",
+                "subtitle": self.subtitle_edit.text().strip(),
                 "target_time": QTime(
                     self.spin_h.value(),
                     self.spin_m.value(),
                     self.spin_s.value(),
                 ).toString(AMBITION_TIME_FORMAT),
                 "image_path": self.image_edit.text().strip(),
+                "completed_image_path": self.completed_image_edit.text().strip(),
             }
         )
