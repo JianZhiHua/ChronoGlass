@@ -1,10 +1,9 @@
 import datetime
 import html
 import os
+import re
 import sys
-import threading
 import urllib.parse
-import urllib.request
 import winsound
 from enum import IntEnum
 
@@ -17,8 +16,9 @@ except ImportError:
     Solar = None
     HAS_LUNAR = False
 
-from PyQt6.QtCore import QPoint, QTime, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QTime, QTimer, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QIcon, QImageReader, QMovie, QPixmap
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkProxyFactory, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -45,6 +45,22 @@ from .state import (
     save_alarms,
     save_config,
 )
+from .theme import (
+    AMBITION_CARD_STYLE,
+    CYAN,
+    DIALOG_STYLE,
+    GREEN,
+    MAGENTA,
+    MENU_STYLE,
+    ORANGE,
+    PURPLE,
+    RED,
+    TEXT,
+    YELLOW,
+    main_frame_style,
+    mode_label_style,
+    top_button_style,
+)
 
 
 class AppMode(IntEnum):
@@ -58,7 +74,8 @@ class AppMode(IntEnum):
 class ChronoGlass(QWidget):
     weather_updated = pyqtSignal(str)
     WINDOW_WIDTH = 450
-    WINDOW_HEIGHT = 225
+    WINDOW_HEIGHT = 245
+    WEATHER_TIMEOUT_MS = 12000
 
     def __init__(self):
         super().__init__()
@@ -75,7 +92,9 @@ class ChronoGlass(QWidget):
         self.ambition_config = normalize_ambition_config(self.config.get("ambition"))
         self.weather_info = ""
         self.weather_fetch_inflight = False
-        self.weather_lock = threading.Lock()
+        QNetworkProxyFactory.setUseSystemConfiguration(True)
+        self.weather_manager = QNetworkAccessManager(self)
+        self.weather_reply = None
         self.cached_clock_info_date = None
         self.cached_clock_info_html = ""
         self.ambition_movie = None
@@ -117,7 +136,8 @@ class ChronoGlass(QWidget):
         frame_layout.setSpacing(0)
 
         top_bar = QHBoxLayout()
-        top_bar.setContentsMargins(20, 15, 15, 0)
+        top_bar.setContentsMargins(18, 12, 16, 0)
+        top_bar.setSpacing(8)
 
         self.mode_label = QLabel()
         self.mode_label.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
@@ -125,33 +145,26 @@ class ChronoGlass(QWidget):
         top_bar.addStretch()
 
         self.mode_btn = QPushButton("⇆")
-        self.mode_btn.setFixedSize(32, 28)
+        self.mode_btn.setFixedSize(34, 30)
+        self.mode_btn.setFont(QFont("Segoe UI Symbol", 15, QFont.Weight.Bold))
         self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.mode_btn.setStyleSheet(
-            """
-            QPushButton { color: #a3be8c; background: rgba(216, 222, 233, 15); border: none; border-bottom: 2px solid #a3be8c; font-size: 16px; font-weight: bold; }
-            QPushButton:hover { background: rgba(216, 222, 233, 30); color: #eceff4; border-bottom: 3px solid #eceff4; }
-            """
-        )
+        self.mode_btn.setStyleSheet(top_button_style(GREEN))
         self.mode_btn.clicked.connect(lambda: self.switch_mode((self.mode + 1) % len(AppMode)))
         top_bar.addWidget(self.mode_btn)
 
         self.min_btn = QPushButton("—")
-        self.min_btn.setFixedSize(32, 28)
+        self.min_btn.setFixedSize(34, 30)
+        self.min_btn.setFont(QFont("Segoe UI Symbol", 15, QFont.Weight.Bold))
         self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.min_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.min_btn.setStyleSheet(
-            """
-            QPushButton { color: #88c0d0; background: rgba(216, 222, 233, 15); border: none; border-bottom: 2px solid #88c0d0; font-size: 16px; font-weight: bold; }
-            QPushButton:hover { background: rgba(216, 222, 233, 30); color: #eceff4; border-bottom: 3px solid #eceff4; }
-            """
-        )
+        self.min_btn.setStyleSheet(top_button_style(CYAN))
         self.min_btn.clicked.connect(self.hide)
         top_bar.addWidget(self.min_btn)
 
         self.close_btn = QPushButton("×")
-        self.close_btn.setFixedSize(32, 28)
+        self.close_btn.setFixedSize(34, 30)
+        self.close_btn.setFont(QFont("Segoe UI Symbol", 15, QFont.Weight.Bold))
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.close_btn.clicked.connect(QApplication.instance().quit)
@@ -178,14 +191,15 @@ class ChronoGlass(QWidget):
     def build_text_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 6, 18, 18)
+        layout.setContentsMargins(18, 0, 18, 14)
         layout.setSpacing(0)
         layout.addStretch()
 
         self.label = QLabel()
-        self.label.setMinimumHeight(150)
+        self.label.setMinimumHeight(178)
         self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setWordWrap(True)
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(self.label)
 
@@ -201,55 +215,7 @@ class ChronoGlass(QWidget):
         self.ambition_card = QFrame()
         self.ambition_card.setObjectName("AmbitionCard")
         self.ambition_card.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.ambition_card.setStyleSheet(
-            """
-            QFrame#AmbitionCard {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 rgba(94, 129, 172, 210),
-                    stop: 0.5 rgba(46, 52, 64, 235),
-                    stop: 1 rgba(191, 97, 106, 205)
-                );
-                border: 1px solid rgba(236, 239, 244, 45);
-                border-radius: 18px;
-            }
-            QLabel#AmbitionTitle {
-                color: #eceff4;
-                font-family: 'Microsoft YaHei';
-                font-size: 15px;
-                font-weight: bold;
-            }
-            QLabel#AmbitionSubtitle {
-                color: rgba(236, 239, 244, 0.82);
-                font-family: 'Microsoft YaHei';
-                font-size: 11pt;
-            }
-            QLabel#AmbitionCountdown {
-                color: #ebcb8b;
-                font-family: 'Consolas';
-                font-size: 36px;
-                font-weight: bold;
-            }
-            QLabel#AmbitionFestival {
-                color: #eceff4;
-                font-family: 'Microsoft YaHei';
-                font-size: 10pt;
-                font-weight: bold;
-                background: rgba(46, 52, 64, 70);
-                border: 1px solid rgba(236, 239, 244, 35);
-                border-radius: 14px;
-                padding: 10px 12px;
-            }
-            QLabel#AmbitionImage {
-                background: rgba(46, 52, 64, 95);
-                border: 1px solid rgba(236, 239, 244, 55);
-                border-radius: 16px;
-                color: rgba(236, 239, 244, 0.82);
-                font-family: 'Microsoft YaHei';
-                font-size: 10pt;
-            }
-            """
-        )
+        self.ambition_card.setStyleSheet(AMBITION_CARD_STYLE)
         layout.addWidget(self.ambition_card)
 
         card_layout = QHBoxLayout(self.ambition_card)
@@ -325,14 +291,7 @@ class ChronoGlass(QWidget):
         self.tray.setIcon(QIcon(self.tray_icon_path))
 
         menu = QMenu()
-        menu.setStyleSheet(
-            """
-            QMenu { background-color: #2e3440; color: #d8dee9; border: 1px solid #4c566a; font-family: 'Microsoft YaHei'; }
-            QMenu::item { padding: 8px 30px; }
-            QMenu::item:selected { background-color: #434c5e; color: #88c0d0; }
-            QMenu::separator { height: 1px; background: #4c566a; margin: 5px 15px; }
-            """
-        )
+        menu.setStyleSheet(MENU_STYLE)
 
         m0_act = QAction("🕒 系统时钟", self)
         m0_act.triggered.connect(lambda: self.switch_mode(AppMode.CLOCK))
@@ -376,18 +335,11 @@ class ChronoGlass(QWidget):
                 self.hide()
 
     def update_style(self, color, mode_text):
-        self.main_frame.setStyleSheet(
-            f"QFrame#MainFrame {{ background-color: rgba(46, 52, 64, 235); border: 2px solid {color}; border-radius: 20px; }}"
-        )
-        self.mode_label.setStyleSheet(f"color: {color}; background: transparent;")
+        self.main_frame.setStyleSheet(main_frame_style(color))
+        self.mode_label.setStyleSheet(mode_label_style(color))
         self.mode_label.setText(mode_text)
-        self.close_btn.setStyleSheet(
-            """
-            QPushButton { color: #bf616a; background: rgba(191, 97, 106, 15); border: none; border-bottom: 2px solid #bf616a; font-size: 18px; font-weight: bold; }
-            QPushButton:hover { background: rgba(191, 97, 106, 40); color: #d8dee9; border-bottom: 3px solid #d8dee9; }
-            """
-        )
-        self.label.setStyleSheet(f"color: {color}; background: transparent; padding-bottom: 15px;")
+        self.close_btn.setStyleSheet(top_button_style(RED))
+        self.label.setStyleSheet(f"color: {color}; background: transparent; padding-bottom: 4px;")
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -563,28 +515,68 @@ class ChronoGlass(QWidget):
         if not self.location:
             return
 
-        with self.weather_lock:
-            if self.weather_fetch_inflight:
+        if self.weather_fetch_inflight:
+            return
+
+        self.weather_fetch_inflight = True
+        url = f"https://wttr.in/{urllib.parse.quote(self.location)}?format=%c+%t&m"
+        request = QNetworkRequest(QUrl(url))
+        request.setTransferTimeout(self.WEATHER_TIMEOUT_MS)
+        request.setRawHeader(b"User-Agent", b"curl/8.0.1")
+        request.setRawHeader(b"Accept", b"text/plain")
+        request.setAttribute(
+            QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
+        )
+
+        self.weather_reply = self.weather_manager.get(request)
+        self.weather_reply.finished.connect(self.on_weather_request_finished)
+
+    def extract_weather_text(self, result):
+        match = re.search(r'<div class="term-container">\s*(.*?)\s*</div>', result, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return ""
+        return re.sub(r"<[^>]+>", "", match.group(1))
+
+    def normalize_weather_result(self, result):
+        normalized = result.strip()
+        if "<html" in normalized.lower():
+            normalized = self.extract_weather_text(normalized)
+        normalized = html.unescape(re.sub(r"\s+", " ", normalized)).strip()
+        if not normalized:
+            return "网络异常"
+        if "unknown location" in normalized.lower() or normalized.lower() == "unknown":
+            return "未找到该地点"
+        if len(normalized) > 20 or "<" in normalized:
+            return "网络异常"
+        return normalized
+
+    def on_weather_request_finished(self):
+        reply = self.sender()
+        if not isinstance(reply, QNetworkReply):
+            return
+
+        try:
+            if reply.error() == QNetworkReply.NetworkError.NoError:
+                result = bytes(reply.readAll()).decode("utf-8", errors="replace").strip()
+                self.weather_updated.emit(self.normalize_weather_result(result))
                 return
-            self.weather_fetch_inflight = True
 
-        def _fetch():
-            try:
-                url = f"https://wttr.in/{urllib.parse.quote(self.location)}?format=%c+%t&m"
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    result = response.read().decode("utf-8").strip()
-                    if len(result) > 20 or "<html" in result.lower() or "unknown" in result.lower():
-                        result = "未找到该地点"
-                    self.weather_updated.emit(result)
-            except Exception as exc:
-                log_error("天气请求失败", exc)
+            status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            status_text = str(status) if status is not None else "-"
+            error = reply.error()
+            url = reply.url().toString()
+            detail = reply.errorString()
+            log_error(f"天气请求失败: url={url} status={status_text} error={error.name} detail={detail}")
+            if error == QNetworkReply.NetworkError.TimeoutError:
+                self.weather_updated.emit("请求超时")
+            else:
                 self.weather_updated.emit("网络异常")
-            finally:
-                with self.weather_lock:
-                    self.weather_fetch_inflight = False
-
-        threading.Thread(target=_fetch, daemon=True).start()
+        finally:
+            self.weather_fetch_inflight = False
+            if reply is self.weather_reply:
+                self.weather_reply = None
+            reply.deleteLater()
 
     def on_weather_updated(self, weather_text):
         self.weather_info = weather_text
@@ -655,14 +647,14 @@ class ChronoGlass(QWidget):
             self.ambition_countdown_label.setVisible(True)
             self.ambition_countdown_label.setText(self.format_ambition_countdown(seconds))
             self.ambition_countdown_label.setStyleSheet(
-                "color: #ebcb8b; font-family: 'Consolas'; font-size: 48px; font-weight: bold;"
+                f"color: {YELLOW}; font-family: 'Consolas'; font-size: 48px; font-weight: bold;"
             )
         else:
             self.ambition_title_label.setText("恭喜")
             self.ambition_subtitle_label.setText(subtitle or "00:00:00")
             self.ambition_subtitle_label.setVisible(True)
             self.ambition_subtitle_label.setStyleSheet(
-                "color: #a3be8c; font-family: 'Consolas'; font-size: 34px; font-weight: bold;"
+                f"color: {GREEN}; font-family: 'Consolas'; font-size: 34px; font-weight: bold;"
             )
             self.ambition_countdown_label.clear()
             self.ambition_countdown_label.setVisible(False)
@@ -784,36 +776,36 @@ class ChronoGlass(QWidget):
             now = datetime.datetime.now()
             info_str = self.get_clock_info_html(now)
             html_text = (
-                f"""<span style="font-family: Consolas; font-size: 52pt; font-weight: bold;">{time_str}</span><br>"""
-                f"""<span style="font-family: 'Microsoft YaHei'; font-size: 11pt; font-weight: normal; line-height: 1.4;">{info_str}</span>"""
+                f"""<span style="font-family: Consolas; font-size: 50pt; font-weight: bold;">{time_str}</span><br>"""
+                f"""<span style="font-family: 'Microsoft YaHei'; font-size: 10pt; font-weight: normal; line-height: 1.18;">{info_str}</span>"""
             )
             self.label.setText(html_text)
-            self.update_style("#88c0d0", "系统时钟")
+            self.update_style(CYAN, "系统时钟")
 
         elif self.mode == AppMode.AMBITION:
             self.content_stack.setCurrentWidget(self.ambition_page)
             self.update_ambition_display()
-            self.update_style("#ebcb8b", "生活的小确幸")
+            self.update_style(PURPLE, "生活的小确幸")
 
         elif self.mode == AppMode.COUNTDOWN:
             self.content_stack.setCurrentWidget(self.text_page)
             self.label.setText(self.format_time(self.remaining_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             if self.remaining_seconds == 0:
-                self.update_style("#bf616a", "时间到！")
+                self.update_style(RED, "时间到！")
             elif self.is_running:
-                self.update_style("#ebcb8b", "倒计时进行中")
+                self.update_style(YELLOW, "倒计时进行中")
             else:
-                self.update_style("#a3be8c", "倒计时已暂停")
+                self.update_style(GREEN, "倒计时已暂停")
 
         elif self.mode == AppMode.STOPWATCH:
             self.content_stack.setCurrentWidget(self.text_page)
             self.label.setText(self.format_time(self.elapsed_seconds))
             self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
             if self.is_running:
-                self.update_style("#b48ead", "正在计时")
+                self.update_style(MAGENTA, "正在计时")
             else:
-                self.update_style("#d8dee9", "计时已暂停")
+                self.update_style(TEXT, "计时已暂停")
 
         elif self.mode == AppMode.ALARM:
             self.content_stack.setCurrentWidget(self.text_page)
@@ -821,7 +813,7 @@ class ChronoGlass(QWidget):
             count = len(self.alarms)
             enabled_count = sum(1 for alarm in self.alarms if alarm["enabled"])
             self.label.setText(f"您现在设定了 {count} 个闹钟\n(已启用 {enabled_count} 个)")
-            self.update_style("#d08770", "闹钟管理")
+            self.update_style(ORANGE, "闹钟管理")
 
     def format_time(self, seconds):
         hours, rem = divmod(seconds, 3600)
@@ -844,6 +836,7 @@ class ChronoGlass(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyleSheet(DIALOG_STYLE)
     app.setQuitOnLastWindowClosed(False)
     window = ChronoGlass()
     return app.exec()

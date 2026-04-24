@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "config": {
+    "location": "南昌县",
+    "ambition": {
+      "title": "搬砖中...",
+      "subtitle": "下班",
+      "target_time": "21:00:00",
+      "image_path": "D:/Users/Administrator/Downloads/OIP-C.webp",
+      "completed_image_path": "D:/Users/Administrator/Downloads/9922720e0cf3d7cae743a3b165d5db186963a998.jpg"
+    }
+  },
+  "alarms": [
+    {
+      "time": "20:50:00",
+      "name": "写日报",
+      "enabled": true,
+      "repeat": "daily",
+      "last_trigger_date": "2026-04-16"
+    }
+  ]
+}

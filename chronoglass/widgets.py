@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .theme import CYAN, MAGENTA, SPIN_BUTTON_STYLE, SPINBOX_STYLE, TEXT_MUTED
+
 
 class ToggleSwitch(QWidget):
     toggled = pyqtSignal(bool)
@@ -43,6 +45,9 @@ class ToggleSwitch(QWidget):
             self.start_animation()
             self.toggled.emit(self._checked)
 
+    def sizeHint(self):
+        return self.size()
+
     def start_animation(self):
         self.anim = QPropertyAnimation(self, b"position")
         self.anim.setDuration(150)
@@ -55,12 +60,15 @@ class ToggleSwitch(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
-        bg_color = QColor("#88c0d0") if self._checked else QColor("#4c566a")
+        bg_color = QColor(CYAN if self._checked else "#263b63")
         painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, rect.width(), rect.height(), 11, 11)
-        painter.setBrush(QBrush(QColor("#eceff4")))
+        painter.setBrush(QBrush(QColor("#060814") if self._checked else QColor(TEXT_MUTED)))
         painter.drawEllipse(self._position, 2, 18, 18)
+        if self._checked:
+            painter.setBrush(QBrush(QColor(MAGENTA)))
+            painter.drawEllipse(self._position + 6, 8, 6, 6)
         painter.end()
 
 
@@ -76,37 +84,20 @@ class CustomSpinBox(QWidget):
         self.spin = QSpinBox()
         self.spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.spin.setFixedSize(55, 30)
-        self.spin.setStyleSheet(
-            """
-            QSpinBox {
-                background-color: #3b4252; border: 1px solid #4c566a; border-right: none;
-                border-top-left-radius: 4px; border-bottom-left-radius: 4px;
-                padding: 5px; color: #eceff4;
-            }
-            """
-        )
+        self.spin.setStyleSheet(SPINBOX_STYLE)
 
         btn_layout = QVBoxLayout()
         btn_layout.setSpacing(0)
 
-        btn_style = """
-            QPushButton {
-                background-color: #3b4252; border: 1px solid #4c566a; color: #eceff4;
-                font-family: 'Consolas', 'Microsoft YaHei'; font-weight: bold; font-size: 14px; padding: 0px;
-            }
-            QPushButton:hover { background-color: #434c5e; }
-            QPushButton:pressed { background-color: #2e3440; }
-        """
-
         self.btn_up = QPushButton("+")
         self.btn_up.setFixedSize(25, 15)
-        self.btn_up.setStyleSheet(btn_style + "border-top-right-radius: 4px; border-bottom: none;")
+        self.btn_up.setStyleSheet(SPIN_BUTTON_STYLE + "border-top-right-radius: 7px; border-bottom: none;")
         self.btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_up.clicked.connect(self.spin.stepUp)
 
         self.btn_down = QPushButton("-")
         self.btn_down.setFixedSize(25, 15)
-        self.btn_down.setStyleSheet(btn_style + "border-bottom-right-radius: 4px;")
+        self.btn_down.setStyleSheet(SPIN_BUTTON_STYLE + "border-bottom-right-radius: 7px;")
         self.btn_down.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_down.clicked.connect(self.spin.stepDown)
 

@@ -1,0 +1,129 @@
+[2026-04-16 17:58:10] 天气请求失败
+Traceback (most recent call last):
+  File "D:\Python38\lib\urllib\request.py", line 1350, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "D:\Python38\lib\http\client.py", line 1255, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1301, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1250, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1010, in _send_output
+    self.send(msg)
+  File "D:\Python38\lib\http\client.py", line 950, in send
+    self.connect()
+  File "D:\Python38\lib\http\client.py", line 1417, in connect
+    super().connect()
+  File "D:\Python38\lib\http\client.py", line 921, in connect
+    self.sock = self._create_connection(
+  File "D:\Python38\lib\socket.py", line 808, in create_connection
+    raise err
+  File "D:\Python38\lib\socket.py", line 796, in create_connection
+    sock.connect(sa)
+socket.timeout: timed out
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\ChronGlass\ChronoGlass.py", line 1425, in _fetch
+    with urllib.request.urlopen(req, timeout=5) as response:
+  File "D:\Python38\lib\urllib\request.py", line 222, in urlopen
+    return opener.open(url, data, timeout)
+  File "D:\Python38\lib\urllib\request.py", line 525, in open
+    response = self._open(req, data)
+  File "D:\Python38\lib\urllib\request.py", line 542, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "D:\Python38\lib\urllib\request.py", line 502, in _call_chain
+    result = func(*args)
+  File "D:\Python38\lib\urllib\request.py", line 1393, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "D:\Python38\lib\urllib\request.py", line 1353, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error timed out>
+
+[2026-04-17 18:33:57] 天气请求失败
+Traceback (most recent call last):
+  File "D:\Python38\lib\urllib\request.py", line 1350, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "D:\Python38\lib\http\client.py", line 1255, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1301, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1250, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1010, in _send_output
+    self.send(msg)
+  File "D:\Python38\lib\http\client.py", line 950, in send
+    self.connect()
+  File "D:\Python38\lib\http\client.py", line 1417, in connect
+    super().connect()
+  File "D:\Python38\lib\http\client.py", line 921, in connect
+    self.sock = self._create_connection(
+  File "D:\Python38\lib\socket.py", line 808, in create_connection
+    raise err
+  File "D:\Python38\lib\socket.py", line 796, in create_connection
+    sock.connect(sa)
+socket.timeout: timed out
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\ChronGlass\chronoglass\app.py", line 553, in _fetch
+    with urllib.request.urlopen(req, timeout=5) as response:
+  File "D:\Python38\lib\urllib\request.py", line 222, in urlopen
+    return opener.open(url, data, timeout)
+  File "D:\Python38\lib\urllib\request.py", line 525, in open
+    response = self._open(req, data)
+  File "D:\Python38\lib\urllib\request.py", line 542, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "D:\Python38\lib\urllib\request.py", line 502, in _call_chain
+    result = func(*args)
+  File "D:\Python38\lib\urllib\request.py", line 1393, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "D:\Python38\lib\urllib\request.py", line 1353, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error timed out>
+
+[2026-04-17 18:51:49] 天气请求失败
+Traceback (most recent call last):
+  File "D:\Python38\lib\urllib\request.py", line 1350, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "D:\Python38\lib\http\client.py", line 1255, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1301, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1250, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "D:\Python38\lib\http\client.py", line 1010, in _send_output
+    self.send(msg)
+  File "D:\Python38\lib\http\client.py", line 950, in send
+    self.connect()
+  File "D:\Python38\lib\http\client.py", line 1417, in connect
+    super().connect()
+  File "D:\Python38\lib\http\client.py", line 921, in connect
+    self.sock = self._create_connection(
+  File "D:\Python38\lib\socket.py", line 808, in create_connection
+    raise err
+  File "D:\Python38\lib\socket.py", line 796, in create_connection
+    sock.connect(sa)
+socket.timeout: timed out
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\ChronGlass\chronoglass\app.py", line 542, in _fetch
+    with urllib.request.urlopen(req, timeout=5) as response:
+  File "D:\Python38\lib\urllib\request.py", line 222, in urlopen
+    return opener.open(url, data, timeout)
+  File "D:\Python38\lib\urllib\request.py", line 525, in open
+    response = self._open(req, data)
+  File "D:\Python38\lib\urllib\request.py", line 542, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "D:\Python38\lib\urllib\request.py", line 502, in _call_chain
+    result = func(*args)
+  File "D:\Python38\lib\urllib\request.py", line 1393, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "D:\Python38\lib\urllib\request.py", line 1353, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error timed out>
+

@@ -21,6 +21,20 @@ from PyQt6.QtWidgets import (
 
 from .common import AMBITION_TIME_FORMAT
 from .state import alarm_remaining_text, normalize_ambition_config, save_alarms
+from .theme import (
+    CYAN,
+    DIALOG_STYLE,
+    HINT_LABEL_STYLE,
+    PRIMARY_BUTTON_STYLE,
+    RED,
+    SECONDARY_BUTTON_STYLE,
+    TABLE_STYLE,
+    TEXT,
+    TEXT_MUTED,
+    TRIGGER_DIALOG_STYLE,
+    YELLOW,
+    trigger_button_style,
+)
 from .widgets import CustomSpinBox, ToggleSwitch
 
 
@@ -30,7 +44,7 @@ class AlarmEditDialog(QDialog):
         self.setWindowTitle(title)
         self.setFixedSize(350, 220)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.setStyleSheet("QDialog { background-color: #2e3440; color: #d8dee9; }")
+        self.setStyleSheet(DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 15)
@@ -61,9 +75,6 @@ class AlarmEditDialog(QDialog):
 
         self.name_edit = QLineEdit()
         self.name_edit.setText(name)
-        self.name_edit.setStyleSheet(
-            "QLineEdit { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }"
-        )
         form.addRow("标签", self.name_edit)
 
         self.repeat_combo = QComboBox()
@@ -71,9 +82,6 @@ class AlarmEditDialog(QDialog):
         self.repeat_combo.addItem("每天", "daily")
         idx = self.repeat_combo.findData(repeat)
         self.repeat_combo.setCurrentIndex(0 if idx < 0 else idx)
-        self.repeat_combo.setStyleSheet(
-            "QComboBox { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 4px; padding: 5px; color: #eceff4; }"
-        )
         form.addRow("重复", self.repeat_combo)
 
         layout.addLayout(form)
@@ -83,16 +91,12 @@ class AlarmEditDialog(QDialog):
 
         cancel_btn = QPushButton("取消")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet(
-            "QPushButton { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 6px; padding: 6px 18px; color: #d8dee9; } QPushButton:hover { background-color: #4c566a; }"
-        )
+        cancel_btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("确定")
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        ok_btn.setStyleSheet(
-            "QPushButton { background-color: #88c0d0; color: #2e3440; border-radius: 6px; padding: 6px 18px; font-weight: bold; } QPushButton:hover { background-color: #8fbcbb; }"
-        )
+        ok_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         ok_btn.clicked.connect(self.accept)
 
         btn_layout.addWidget(cancel_btn)
@@ -126,24 +130,21 @@ class AlarmSettingsDialog(QDialog):
         self.setWindowTitle("闹钟设置")
         self.setMinimumSize(540, 420)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.setStyleSheet("background-color: #2e3440; color: #d8dee9;")
+        self.setStyleSheet(DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
         add_btn = QPushButton("➕ 添加闹钟")
         del_btn = QPushButton("➖ 删除选中")
         edit_btn = QPushButton("✏️ 修改选中")
 
         for btn in (add_btn, del_btn, edit_btn):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                """
-                QPushButton { background-color: #3b4252; border: 1px solid #4c566a; border-radius: 6px; padding: 6px 12px; color: #eceff4; font-weight: bold; }
-                QPushButton:hover { background-color: #434c5e; border: 1px solid #88c0d0; }
-                """
-            )
+            btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
             btn_layout.addWidget(btn)
 
         add_btn.clicked.connect(self.add_alarm)
@@ -163,22 +164,10 @@ class AlarmSettingsDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.setShowGrid(False)
-        self.table.setStyleSheet(
-            """
-            QTableWidget {
-                background-color: #2e3440; color: #eceff4; border: 1px solid #4c566a;
-                font-family: 'Consolas', 'Microsoft YaHei'; font-size: 13px; border-radius: 6px;
-            }
-            QHeaderView::section {
-                background-color: #3b4252; color: #88c0d0; padding: 8px; border: none;
-                border-bottom: 2px solid #4c566a; border-right: 1px solid #434c5e;
-                font-family: 'Microsoft YaHei'; font-weight: bold;
-            }
-            QTableWidget::item { border-bottom: 1px solid #3b4252; padding: 4px; }
-            QTableWidget::item:selected { background-color: #4c566a; color: #eceff4; }
-            """
-        )
+        self.table.setStyleSheet(TABLE_STYLE)
+        self.table.setAlternatingRowColors(True)
 
         self.refresh_table()
         layout.addWidget(self.table)
@@ -188,12 +177,7 @@ class AlarmSettingsDialog(QDialog):
 
         close_btn = QPushButton("完成并关闭")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
-            """
-            QPushButton { background-color: #88c0d0; color: #2e3440; border-radius: 6px; padding: 8px 24px; font-weight: bold; }
-            QPushButton:hover { background-color: #8fbcbb; }
-            """
-        )
+        close_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         close_btn.clicked.connect(self.close)
         bottom_layout.addWidget(close_btn)
         layout.addLayout(bottom_layout)
@@ -221,13 +205,14 @@ class AlarmSettingsDialog(QDialog):
 
             is_expired = alarm.get("repeat", "once") == "once" and remaining in ("已过期", "已触发")
             if is_expired:
-                rem_item.setForeground(QColor("#bf616a"))
+                rem_item.setForeground(QColor(RED))
             self.table.setItem(index, 3, rem_item)
 
             chk = ToggleSwitch(checked=alarm["enabled"])
             chk.toggled.connect(lambda checked, idx=index: self.toggle_alarm(idx, checked))
 
             cell_widget = QWidget()
+            cell_widget.setStyleSheet("background: transparent;")
             chk_layout = QHBoxLayout(cell_widget)
             chk_layout.addWidget(chk)
             chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -245,7 +230,7 @@ class AlarmSettingsDialog(QDialog):
 
             if rem_item:
                 rem_item.setText(rem_text)
-                rem_item.setForeground(QColor("#bf616a" if is_expired else "#eceff4"))
+                rem_item.setForeground(QColor(RED if is_expired else TEXT))
 
             cell_widget = self.table.cellWidget(index, 4)
             if cell_widget:
@@ -321,10 +306,10 @@ class AlarmTriggerDialog(QDialog):
         )
         self.setModal(True)
         self.setFixedSize(450, 260)
-        self.setStyleSheet("QDialog { background-color: #2e3440; border: 2px solid #bf616a; border-radius: 12px; }")
+        self.setStyleSheet(TRIGGER_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 20)
+        layout.setContentsMargins(18, 12, 18, 20)
 
         top_layout = QHBoxLayout()
         top_layout.addStretch()
@@ -336,7 +321,7 @@ class AlarmTriggerDialog(QDialog):
         close_btn.setAutoDefault(False)
         close_btn.setDefault(False)
         close_btn.setStyleSheet(
-            "QPushButton { border: none; color: #4c566a; font-weight: bold; font-size: 16px; } QPushButton:hover { color: #bf616a; }"
+            f"QPushButton {{ border: none; color: {TEXT_MUTED}; background: transparent; font-weight: bold; font-size: 16px; }} QPushButton:hover {{ color: {RED}; }}"
         )
         close_btn.clicked.connect(self.do_done)
         top_layout.addWidget(close_btn)
@@ -351,13 +336,13 @@ class AlarmTriggerDialog(QDialog):
         time_label = QLabel(time_str)
         time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         time_label.setFont(QFont("Consolas", 11))
-        time_label.setStyleSheet("color: #88c0d0;")
+        time_label.setStyleSheet(f"color: {CYAN}; background: transparent;")
         layout.addWidget(time_label)
 
         name_label = QLabel(self.alarm["name"])
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setFont(QFont("Microsoft YaHei", 18, QFont.Weight.Bold))
-        name_label.setStyleSheet("color: #eceff4; margin-top: 5px; margin-bottom: 20px;")
+        name_label.setStyleSheet(f"color: {TEXT}; background: transparent; margin-top: 5px; margin-bottom: 20px;")
         layout.addWidget(name_label)
 
         btn_layout = QHBoxLayout()
@@ -367,15 +352,13 @@ class AlarmTriggerDialog(QDialog):
         edit_btn = QPushButton("修改设置")
         done_btn = QPushButton("完成")
 
-        for btn, color in ((snooze_btn, "#81a1c1"), (edit_btn, "#ebcb8b"), (done_btn, "#bf616a")):
+        for btn, color in ((snooze_btn, CYAN), (edit_btn, YELLOW), (done_btn, RED)):
             btn.setFixedHeight(40)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setAutoDefault(False)
             btn.setDefault(False)
-            btn.setStyleSheet(
-                f"background-color: {color}; color: #2e3440; border-radius: 6px; font-size: 15px; font-weight: bold;"
-            )
+            btn.setStyleSheet(trigger_button_style(color))
             btn_layout.addWidget(btn)
 
         snooze_btn.clicked.connect(self.do_snooze)
@@ -419,30 +402,7 @@ class AmbitionEditDialog(QDialog):
         self.setWindowTitle("修改倒计时")
         self.setModal(True)
         self.setMinimumWidth(460)
-        self.setStyleSheet(
-            """
-            QDialog { background-color: #2e3440; color: #d8dee9; }
-            QLabel { color: #d8dee9; font-family: 'Microsoft YaHei'; }
-            QLineEdit {
-                background-color: #3b4252;
-                color: #eceff4;
-                border: 1px solid #4c566a;
-                border-radius: 6px;
-                padding: 8px 10px;
-                font-family: 'Microsoft YaHei';
-            }
-            QPushButton {
-                background-color: #5e81ac;
-                color: #eceff4;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 14px;
-                font-family: 'Microsoft YaHei';
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #81a1c1; }
-            """
-        )
+        self.setStyleSheet(DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -500,45 +460,19 @@ class AmbitionEditDialog(QDialog):
 
         hint_label = QLabel("右侧图片支持 GIF 动图；完成后标题仅在完成后显示，可分别设置进行中和完成后的图片，时间将按 HH:mm:ss 保存。")
         hint_label.setWordWrap(True)
-        hint_label.setStyleSheet("color: #81a1c1;")
+        hint_label.setStyleSheet(HINT_LABEL_STYLE)
         layout.addWidget(hint_label)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
         cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #4c566a;
-                color: #eceff4;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                font-family: 'Microsoft YaHei';
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #616e88; }
-            """
-        )
+        cancel_btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
 
         save_btn = QPushButton("保存")
-        save_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #a3be8c;
-                color: #2e3440;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                font-family: 'Microsoft YaHei';
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #b8d29f; }
-            """
-        )
+        save_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         save_btn.clicked.connect(self.accept)
         btn_row.addWidget(save_btn)
 
@@ -558,20 +492,7 @@ class AmbitionEditDialog(QDialog):
         image_row.addWidget(browse_btn)
 
         clear_btn = QPushButton("清空")
-        clear_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #4c566a;
-                color: #eceff4;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 14px;
-                font-family: 'Microsoft YaHei';
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #616e88; }
-            """
-        )
+        clear_btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
         clear_btn.clicked.connect(image_edit.clear)
         image_row.addWidget(clear_btn)
 
