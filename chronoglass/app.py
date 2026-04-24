@@ -46,7 +46,6 @@ from .state import (
     save_config,
 )
 from .theme import (
-    AMBITION_CARD_STYLE,
     CYAN,
     DIALOG_STYLE,
     GREEN,
@@ -57,6 +56,7 @@ from .theme import (
     RED,
     TEXT,
     YELLOW,
+    ambition_page_style,
     main_frame_style,
     mode_label_style,
     top_button_style,
@@ -73,8 +73,8 @@ class AppMode(IntEnum):
 
 class ChronoGlass(QWidget):
     weather_updated = pyqtSignal(str)
-    WINDOW_WIDTH = 450
-    WINDOW_HEIGHT = 245
+    WINDOW_WIDTH = 400
+    WINDOW_HEIGHT = 220
     WEATHER_TIMEOUT_MS = 12000
 
     def __init__(self):
@@ -121,8 +121,7 @@ class ChronoGlass(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowIcon(QIcon(self.icon_path))
-        self.setMinimumSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
-        self.resize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
+        self.setFixedSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
 
         self.main_frame = QFrame(self)
         self.main_frame.setObjectName("MainFrame")
@@ -196,7 +195,7 @@ class ChronoGlass(QWidget):
         layout.addStretch()
 
         self.label = QLabel()
-        self.label.setMinimumHeight(178)
+        self.label.setMinimumHeight(160)
         self.label.setFont(QFont("Consolas", 52, QFont.Weight.Bold))
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setWordWrap(True)
@@ -208,24 +207,26 @@ class ChronoGlass(QWidget):
 
     def build_ambition_page(self):
         page = QWidget()
+        page.setStyleSheet(ambition_page_style(PURPLE))
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 8, 18, 18)
+        layout.setContentsMargins(18, 0, 18, 14)
         layout.setSpacing(0)
+        layout.addStretch()
 
         self.ambition_card = QFrame()
         self.ambition_card.setObjectName("AmbitionCard")
         self.ambition_card.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.ambition_card.setStyleSheet(AMBITION_CARD_STYLE)
         layout.addWidget(self.ambition_card)
 
         card_layout = QHBoxLayout(self.ambition_card)
-        card_layout.setContentsMargins(22, 8, 18, 12)
+        card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(16)
 
         left_layout = QVBoxLayout()
         left_layout.setSpacing(2)
 
         self.ambition_text_container = QWidget()
+        self.ambition_text_container.setObjectName("AmbitionTextBlock")
         self.ambition_text_container.setFixedSize(220, 72)
 
         text_layout = QVBoxLayout(self.ambition_text_container)
@@ -284,6 +285,7 @@ class ChronoGlass(QWidget):
         right_layout.addStretch()
         card_layout.addLayout(right_layout, 2)
 
+        layout.addStretch()
         return page
 
     def create_tray(self):
@@ -646,16 +648,12 @@ class ChronoGlass(QWidget):
             self.ambition_subtitle_label.setStyleSheet("")
             self.ambition_countdown_label.setVisible(True)
             self.ambition_countdown_label.setText(self.format_ambition_countdown(seconds))
-            self.ambition_countdown_label.setStyleSheet(
-                f"color: {YELLOW}; font-family: 'Consolas'; font-size: 48px; font-weight: bold;"
-            )
+            self.ambition_countdown_label.setStyleSheet("")
         else:
             self.ambition_title_label.setText("恭喜")
             self.ambition_subtitle_label.setText(subtitle or "00:00:00")
             self.ambition_subtitle_label.setVisible(True)
-            self.ambition_subtitle_label.setStyleSheet(
-                f"color: {GREEN}; font-family: 'Consolas'; font-size: 34px; font-weight: bold;"
-            )
+            self.ambition_subtitle_label.setStyleSheet("")
             self.ambition_countdown_label.clear()
             self.ambition_countdown_label.setVisible(False)
 

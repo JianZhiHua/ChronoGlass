@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .theme import CYAN, MAGENTA, SPIN_BUTTON_STYLE, SPINBOX_STYLE, TEXT_MUTED
+from .theme import BG_PANEL, BORDER, CYAN, MAGENTA, SPIN_BUTTON_STYLE, SPINBOX_STYLE, TEXT_MUTED
 
 
 class ToggleSwitch(QWidget):
@@ -60,11 +60,11 @@ class ToggleSwitch(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
-        bg_color = QColor(CYAN if self._checked else "#263b63")
+        bg_color = QColor(CYAN if self._checked else BORDER)
         painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, rect.width(), rect.height(), 11, 11)
-        painter.setBrush(QBrush(QColor("#060814") if self._checked else QColor(TEXT_MUTED)))
+        painter.setBrush(QBrush(QColor(BG_PANEL) if self._checked else QColor(TEXT_MUTED)))
         painter.drawEllipse(self._position, 2, 18, 18)
         if self._checked:
             painter.setBrush(QBrush(QColor(MAGENTA)))
