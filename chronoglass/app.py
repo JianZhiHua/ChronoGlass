@@ -1,5 +1,6 @@
 import datetime
 import html
+import json
 import os
 import re
 import sys
@@ -258,13 +259,27 @@ class ChronoGlass(QWidget):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
         )
 
+        badges_layout = QHBoxLayout()
+        badges_layout.setContentsMargins(0, 0, 0, 0)
+        badges_layout.setSpacing(8)
+
         self.ambition_festival_label = QLabel()
         self.ambition_festival_label.setObjectName("AmbitionFestival")
         self.ambition_festival_label.setWordWrap(True)
         self.ambition_festival_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ambition_festival_label.setFixedWidth(82)
         self.ambition_festival_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        left_layout.addWidget(self.ambition_festival_label, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        badges_layout.addWidget(self.ambition_festival_label)
+
+        self.ambition_jieqi_label = QLabel()
+        self.ambition_jieqi_label.setObjectName("AmbitionJieqi")
+        self.ambition_jieqi_label.setWordWrap(True)
+        self.ambition_jieqi_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ambition_jieqi_label.setFixedWidth(82)
+        self.ambition_jieqi_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        badges_layout.addWidget(self.ambition_jieqi_label)
+
+        left_layout.addLayout(badges_layout)
 
         left_layout.addStretch()
 
@@ -521,11 +536,11 @@ class ChronoGlass(QWidget):
             return
 
         self.weather_fetch_inflight = True
-        url = f"https://wttr.in/{urllib.parse.quote(self.location)}?format=%c+%t&m"
+        url = f"https://wttr.in/{urllib.parse.quote(self.location)}?format=j1&lang=zh"
         request = QNetworkRequest(QUrl(url))
         request.setTransferTimeout(self.WEATHER_TIMEOUT_MS)
         request.setRawHeader(b"User-Agent", b"curl/8.0.1")
-        request.setRawHeader(b"Accept", b"text/plain")
+        request.setRawHeader(b"Accept", b"application/json")
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
@@ -544,14 +559,91 @@ class ChronoGlass(QWidget):
         normalized = result.strip()
         if "<html" in normalized.lower():
             normalized = self.extract_weather_text(normalized)
-        normalized = html.unescape(re.sub(r"\s+", " ", normalized)).strip()
+        normalized = html.unescape(normalized).strip()
+        if normalized.startswith("{"):
+            return self.parse_weather_json(normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
         if not normalized:
             return "网络异常"
         if "unknown location" in normalized.lower() or normalized.lower() == "unknown":
             return "未找到该地点"
-        if len(normalized) > 20 or "<" in normalized:
+        if len(normalized) > 64 or "<" in normalized:
             return "网络异常"
         return normalized
+
+    def parse_weather_json(self, result):
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return "网络异常"
+
+        current_condition = payload.get("current_condition")
+        if not isinstance(current_condition, list) or not current_condition:
+            return "网络异常"
+
+        condition = current_condition[0]
+        description = self.get_weather_description(condition)
+        temp_c = str(condition.get("temp_C", "")).strip()
+        wind_dir = self.format_wind_direction(str(condition.get("winddir16Point", "")).strip())
+        wind_level = self.format_wind_level(str(condition.get("windspeedKmph", "")).strip())
+        humidity = str(condition.get("humidity", "")).strip()
+
+        weather_part = description or "天气未知"
+        if temp_c:
+            weather_part = f"{weather_part} {temp_c}°C"
+
+        detail_parts = [weather_part]
+        if wind_dir or wind_level:
+            detail_parts.append(f"{wind_dir}{wind_level}".strip())
+        if humidity:
+            detail_parts.append(f"湿度 {humidity}%")
+        return " | ".join(part for part in detail_parts if part).strip() or "网络异常"
+
+    def get_weather_description(self, condition):
+        for key in ("lang_zh", "weatherDesc"):
+            values = condition.get(key)
+            if not isinstance(values, list) or not values:
+                continue
+            first_value = values[0]
+            if not isinstance(first_value, dict):
+                continue
+            text = str(first_value.get("value", "")).strip()
+            if text:
+                return text
+        return ""
+
+    def format_wind_direction(self, direction):
+        direction_map = {
+            "N": "北风",
+            "NNE": "北东北风",
+            "NE": "东北风",
+            "ENE": "东东北风",
+            "E": "东风",
+            "ESE": "东东南风",
+            "SE": "东南风",
+            "SSE": "南东南风",
+            "S": "南风",
+            "SSW": "南南西风",
+            "SW": "西南风",
+            "WSW": "西西南风",
+            "W": "西风",
+            "WNW": "西西北风",
+            "NW": "西北风",
+            "NNW": "北北西风",
+        }
+        return direction_map.get(direction.upper(), "")
+
+    def format_wind_level(self, wind_speed_kmph):
+        try:
+            speed = float(wind_speed_kmph)
+        except (TypeError, ValueError):
+            return ""
+
+        level_thresholds = [1, 5, 11, 19, 28, 38, 49, 61, 74, 88, 102, 117]
+        for level, upper_bound in enumerate(level_thresholds):
+            if speed <= upper_bound:
+                return f"{level}级"
+        return "12级"
 
     def on_weather_request_finished(self):
         reply = self.sender()
@@ -658,7 +750,8 @@ class ChronoGlass(QWidget):
             self.ambition_countdown_label.setVisible(False)
 
         if HAS_LUNAR:
-            festival_name, festival_days = self.get_next_festival_info(datetime.date.today())
+            today = datetime.date.today()
+            festival_name, festival_days = self.get_next_festival_info(today)
             festival_display = self.truncate_display_text(festival_name, 4)
             if festival_days is None:
                 badge_text = f"{festival_display}\n待定"
@@ -667,8 +760,20 @@ class ChronoGlass(QWidget):
             else:
                 badge_text = f"{festival_display}\n{festival_days}天"
             self.ambition_festival_label.setText(badge_text)
+
+            solar = Solar.fromYmd(today.year, today.month, today.day)
+            jieqi_name, jieqi_days = self.get_next_jieqi_info(solar.getLunar(), today)
+            jieqi_display = self.truncate_display_text(jieqi_name, 4)
+            if jieqi_days is None:
+                jieqi_text = f"{jieqi_display}\n待定"
+            elif jieqi_days <= 0:
+                jieqi_text = f"{jieqi_display}\n今天"
+            else:
+                jieqi_text = f"{jieqi_display}\n{jieqi_days}天"
+            self.ambition_jieqi_label.setText(jieqi_text)
         else:
             self.ambition_festival_label.setText("节日\n待启用")
+            self.ambition_jieqi_label.setText("节气\n待启用")
 
         self.update_ambition_image(is_completed)
 
@@ -683,26 +788,22 @@ class ChronoGlass(QWidget):
 
         location_text = html.escape(self.location)
         weather_text = html.escape(self.weather_info)
-        weather_str = (
-            f" &nbsp;|&nbsp; {location_text} {weather_text}".rstrip()
-            if self.location
-            else " &nbsp;|&nbsp; 双击添加天气"
-        )
-        line1_str = f"{date_str} {week_str}{weather_str}"
+        weather_display = weather_text or "获取中..."
+        weather_line = f"{location_text} {weather_display}".strip() if self.location else "双击添加天气"
 
         if HAS_LUNAR:
             lunar = Lunar.fromDate(now)
-            jieqi_name, jieqi_days = self.get_next_jieqi_info(lunar, today)
             lunar_date_str = html.escape(f"农历{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}")
-            jieqi_display = html.escape(jieqi_name)
             yi = html.escape(" ".join(lunar.getDayYi()[:4]) or "无")
             ji = html.escape(" ".join(lunar.getDayJi()[:4]) or "无")
-            line2_str = f"{lunar_date_str} &nbsp;|&nbsp; 最近节气: {jieqi_display}({self.format_days_until(jieqi_days)})"
+            line1_str = f"{date_str} {week_str} &nbsp;|&nbsp; {lunar_date_str}"
+            line2_str = weather_line
             line3_str = f"宜: {yi} &nbsp;|&nbsp; 忌: {ji}"
             info_str = "<br>".join([line1_str, line2_str, line3_str])
         else:
+            line1_str = f"{date_str} {week_str}"
             info_str = (
-                f"{line1_str}<br><span style='font-size: 9pt;'>"
+                f"{line1_str}<br>{weather_line}<br><span style='font-size: 9pt;'>"
                 "(如需显示农历黄历，请在终端运行 pip install lunar-python)</span>"
             )
 

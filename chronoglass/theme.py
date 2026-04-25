@@ -120,7 +120,8 @@ def ambition_page_style(accent):
             font-size: 46px;
             font-weight: bold;
         }}
-        QLabel#AmbitionFestival {{
+        QLabel#AmbitionFestival,
+        QLabel#AmbitionJieqi {{
             color: {accent};
             background: rgba(255, 255, 255, 170);
             border: 1px solid rgba(127, 203, 172, 120);
