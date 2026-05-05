@@ -79,17 +79,21 @@ echo.
 
 echo [1/2] 正在执行 Nuitka 高级打包...
 "%VENV_PYTHON%" -m nuitka --standalone --onefile ^
+--lto=yes ^
+--jobs=4 ^
+--plugin-enable=upx ^
+--onefile-no-compression ^
 --windows-console-mode=disable ^
 --enable-plugin=pyqt6 ^
 --include-qt-plugins=imageformats ^
 --windows-icon-from-ico=tray_icon.ico ^
 --include-data-files="tray_icon.png=tray_icon.png" ^
---company-name="HuanQingYi" ^
+--windows-company-name="HuanQingYi" ^
 --product-name="ChronoGlass" ^
---file-description="ChronoGlass - 极简几何计时器" ^
+--windows-file-description="ChronoGlass - 极简几何计时器" ^
 --copyright="Copyright (C) 2026 HuanQingYi. All rights reserved." ^
 --file-version=1.2.0.0 ^
---product-version=1.2.0.0 ^
+--windows-product-version=1.2.0.0 ^
 --output-dir=out ^
 ChronoGlass.py
 
