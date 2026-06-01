@@ -100,7 +100,7 @@ def deserialize_alarm(record):
 def default_ambition_config():
     target_time = QTime.currentTime().addSecs(3600)
     return {
-        "title": "生活的小确幸",
+        "title": "搬砖",
         "subtitle": "",
         "target_time": target_time.toString(AMBITION_TIME_FORMAT),
         "image_path": "",
@@ -115,7 +115,8 @@ def normalize_ambition_config(record):
 
     title = record.get("title")
     if isinstance(title, str) and title.strip():
-        ambition["title"] = title.strip()
+        title_text = title.strip()
+        ambition["title"] = "搬砖" if title_text == "生活的小确幸" else title_text
 
     subtitle = record.get("subtitle")
     if isinstance(subtitle, str):

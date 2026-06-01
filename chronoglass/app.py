@@ -17,7 +17,7 @@ except ImportError:
     Solar = None
     HAS_LUNAR = False
 
-from PyQt6.QtCore import QPoint, QTime, QTimer, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QTime, QTimer, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QIcon, QImageReader, QMovie, QPixmap
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkProxyFactory, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
@@ -268,7 +268,6 @@ class ChronoGlass(QWidget):
         self.ambition_festival_label.setWordWrap(True)
         self.ambition_festival_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ambition_festival_label.setFixedWidth(82)
-        self.ambition_festival_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         badges_layout.addWidget(self.ambition_festival_label)
 
         self.ambition_jieqi_label = QLabel()
@@ -276,7 +275,6 @@ class ChronoGlass(QWidget):
         self.ambition_jieqi_label.setWordWrap(True)
         self.ambition_jieqi_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ambition_jieqi_label.setFixedWidth(82)
-        self.ambition_jieqi_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         badges_layout.addWidget(self.ambition_jieqi_label)
 
         left_layout.addLayout(badges_layout)
@@ -300,6 +298,18 @@ class ChronoGlass(QWidget):
         right_layout.addStretch()
         card_layout.addLayout(right_layout, 2)
 
+        self.ambition_drag_widgets = (
+            self.content_stack,
+            page,
+            self.ambition_card,
+            self.ambition_text_container,
+            self.ambition_festival_label,
+            self.ambition_jieqi_label,
+            self.ambition_image_label,
+        )
+        for widget in self.ambition_drag_widgets:
+            widget.installEventFilter(self)
+
         layout.addStretch()
         return page
 
@@ -312,7 +322,7 @@ class ChronoGlass(QWidget):
 
         m0_act = QAction("🕒 系统时钟", self)
         m0_act.triggered.connect(lambda: self.switch_mode(AppMode.CLOCK))
-        m1_act = QAction("🎯 生活的小确幸", self)
+        m1_act = QAction("🧱 搬砖", self)
         m1_act.triggered.connect(lambda: self.switch_mode(AppMode.AMBITION))
         m2_act = QAction("⏳ 倒计时模式", self)
         m2_act.triggered.connect(lambda: self.switch_mode(AppMode.COUNTDOWN))
@@ -322,6 +332,8 @@ class ChronoGlass(QWidget):
         m4_act.triggered.connect(lambda: self.switch_mode(AppMode.ALARM))
         reset_act = QAction("🔄 重置当前计时", self)
         reset_act.triggered.connect(self.reset_timer)
+        ambition_settings_act = QAction("🧱 搬砖设置", self)
+        ambition_settings_act.triggered.connect(self.open_ambition_editor)
         settings_act = QAction("⚙️ 闹钟设置", self)
         settings_act.triggered.connect(self.open_alarm_settings)
         quit_act = QAction("❌ 彻底退出程序", self)
@@ -334,6 +346,7 @@ class ChronoGlass(QWidget):
         menu.addAction(m4_act)
         menu.addSeparator()
         menu.addAction(reset_act)
+        menu.addAction(ambition_settings_act)
         menu.addAction(settings_act)
         menu.addSeparator()
         menu.addAction(quit_act)
@@ -387,11 +400,11 @@ class ChronoGlass(QWidget):
         super().wheelEvent(event)
 
     def contextMenuEvent(self, event):
-        if self.mode == AppMode.AMBITION:
-            self.open_ambition_editor()
-            event.accept()
-            return
-        self.tray.contextMenu().exec(event.globalPos())
+        self.show_global_context_menu(event.globalPos())
+        event.accept()
+
+    def show_global_context_menu(self, global_pos):
+        self.tray.contextMenu().exec(global_pos)
 
     def set_custom_time(self):
         value, ok = QInputDialog.getInt(
@@ -419,15 +432,37 @@ class ChronoGlass(QWidget):
         else:
             super().keyPressEvent(event)
 
+    def begin_drag(self, global_position):
+        self.drag_position = global_position - self.frameGeometry().topLeft()
+
+    def drag_window(self, global_position):
+        self.move(global_position - self.drag_position)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self.begin_drag(event.globalPosition().toPoint())
             event.accept()
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self.drag_position)
+            self.drag_window(event.globalPosition().toPoint())
             event.accept()
+
+    def eventFilter(self, watched, event):
+        if getattr(self, "ambition_drag_widgets", ()) and watched in self.ambition_drag_widgets and self.mode == AppMode.AMBITION:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self.begin_drag(event.globalPosition().toPoint())
+                event.accept()
+                return True
+            if event.type() == QEvent.Type.MouseMove and event.buttons() & Qt.MouseButton.LeftButton:
+                self.drag_window(event.globalPosition().toPoint())
+                event.accept()
+                return True
+            if event.type() == QEvent.Type.ContextMenu:
+                self.show_global_context_menu(event.globalPos())
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
 
     def save_current_config(self):
         self.config["location"] = self.location
@@ -569,7 +604,7 @@ class ChronoGlass(QWidget):
             return "未找到该地点"
         if len(normalized) > 64 or "<" in normalized:
             return "网络异常"
-        return normalized
+        return self.translate_weather_description(normalized)
 
     def parse_weather_json(self, result):
         try:
@@ -590,7 +625,7 @@ class ChronoGlass(QWidget):
 
         weather_part = description or "天气未知"
         if temp_c:
-            weather_part = f"{weather_part} {temp_c}°C"
+            weather_part = f"{weather_part} {temp_c}℃"
 
         detail_parts = [weather_part]
         if wind_dir or wind_level:
@@ -609,8 +644,132 @@ class ChronoGlass(QWidget):
                 continue
             text = str(first_value.get("value", "")).strip()
             if text:
-                return text
-        return ""
+                translated = self.translate_weather_description(text)
+                if translated != "天气未知":
+                    return translated
+        return self.translate_weather_code(str(condition.get("weatherCode", "")).strip())
+
+    def translate_weather_code(self, weather_code):
+        code_map = {
+            "113": "晴天",
+            "116": "局部多云",
+            "119": "多云",
+            "122": "阴天",
+            "143": "薄雾",
+            "176": "零星小雨",
+            "179": "零星小雪",
+            "182": "零星雨夹雪",
+            "185": "零星冻毛毛雨",
+            "200": "雷暴",
+            "227": "风吹雪",
+            "230": "暴风雪",
+            "248": "雾",
+            "260": "冻雾",
+            "263": "零星小毛毛雨",
+            "266": "小毛毛雨",
+            "281": "冻毛毛雨",
+            "284": "强冻毛毛雨",
+            "293": "零星小雨",
+            "296": "小雨",
+            "299": "间歇性中雨",
+            "302": "中雨",
+            "305": "间歇性大雨",
+            "308": "大雨",
+            "311": "小冻雨",
+            "314": "中到大冻雨",
+            "317": "小雨夹雪",
+            "320": "中到大雨夹雪",
+            "323": "零星小雪",
+            "326": "小雪",
+            "329": "零星中雪",
+            "332": "中雪",
+            "335": "零星大雪",
+            "338": "大雪",
+            "350": "冰粒",
+            "353": "小阵雨",
+            "356": "中到大阵雨",
+            "359": "暴阵雨",
+            "362": "小阵性雨夹雪",
+            "365": "中到大阵性雨夹雪",
+            "368": "小阵雪",
+            "371": "中到大阵雪",
+            "374": "小冰粒阵雨",
+            "377": "中到大冰粒阵雨",
+            "386": "零星雷阵雨",
+            "389": "中到大雷阵雨",
+            "392": "零星雷阵雪",
+            "395": "中到大雷阵雪",
+        }
+        return code_map.get(weather_code, "天气未知")
+
+    def translate_weather_description(self, description):
+        description_text = re.sub(r"\s+", " ", str(description)).strip()
+        if not description_text:
+            return ""
+
+        description_map = {
+            "sunny": "晴天",
+            "clear": "晴朗",
+            "partly cloudy": "局部多云",
+            "cloudy": "多云",
+            "overcast": "阴天",
+            "mist": "薄雾",
+            "fog": "雾",
+            "freezing fog": "冻雾",
+            "patchy rain possible": "零星小雨",
+            "patchy rain nearby": "附近零星降雨",
+            "patchy snow possible": "零星小雪",
+            "patchy snow nearby": "附近零星降雪",
+            "patchy sleet possible": "零星雨夹雪",
+            "patchy sleet nearby": "附近零星雨夹雪",
+            "patchy freezing drizzle possible": "零星冻毛毛雨",
+            "patchy freezing drizzle nearby": "附近零星冻毛毛雨",
+            "thundery outbreaks possible": "雷暴",
+            "thundery outbreaks in nearby": "附近有雷暴",
+            "blowing snow": "风吹雪",
+            "blizzard": "暴风雪",
+            "patchy light drizzle": "零星小毛毛雨",
+            "light drizzle": "小毛毛雨",
+            "freezing drizzle": "冻毛毛雨",
+            "heavy freezing drizzle": "强冻毛毛雨",
+            "patchy light rain": "零星小雨",
+            "light rain": "小雨",
+            "moderate rain at times": "间歇性中雨",
+            "moderate rain": "中雨",
+            "heavy rain at times": "间歇性大雨",
+            "heavy rain": "大雨",
+            "light freezing rain": "小冻雨",
+            "moderate or heavy freezing rain": "中到大冻雨",
+            "light sleet": "小雨夹雪",
+            "moderate or heavy sleet": "中到大雨夹雪",
+            "patchy light snow": "零星小雪",
+            "light snow": "小雪",
+            "patchy moderate snow": "零星中雪",
+            "moderate snow": "中雪",
+            "patchy heavy snow": "零星大雪",
+            "heavy snow": "大雪",
+            "ice pellets": "冰粒",
+            "light rain shower": "小阵雨",
+            "moderate or heavy rain shower": "中到大阵雨",
+            "torrential rain shower": "暴阵雨",
+            "light sleet showers": "小阵性雨夹雪",
+            "moderate or heavy sleet showers": "中到大阵性雨夹雪",
+            "light snow showers": "小阵雪",
+            "moderate or heavy snow showers": "中到大阵雪",
+            "light showers of ice pellets": "小冰粒阵雨",
+            "moderate or heavy showers of ice pellets": "中到大冰粒阵雨",
+            "patchy light rain with thunder": "零星雷阵雨",
+            "moderate or heavy rain with thunder": "中到大雷阵雨",
+            "patchy light snow with thunder": "零星雷阵雪",
+            "moderate or heavy snow with thunder": "中到大雷阵雪",
+        }
+
+        translated = description_map.get(description_text.lower())
+        if translated:
+            return translated
+        if re.search(r"[A-Za-z]", description_text):
+            return "天气未知"
+        return description_text
 
     def format_wind_direction(self, direction):
         direction_map = {
@@ -702,6 +861,20 @@ class ChronoGlass(QWidget):
             return text
         return f"{text[:max_chars]}..."
 
+    def format_badge_status(self, days, compact=False):
+        if days is None:
+            return "待定"
+        if days <= 0:
+            return "今天"
+        return f"{days}天" if compact else f"还有{days}天"
+
+    def set_badge_display(self, label, full_name, days, placeholder_name):
+        short_name = self.truncate_display_text(full_name, 4)
+        compact_status = self.format_badge_status(days, compact=True)
+        full_status = self.format_badge_status(days, compact=False)
+        label.setText(f"{short_name}\n{compact_status}")
+        label.setToolTip(f"{full_name or placeholder_name}\n{full_status}")
+
     def get_next_festival_info(self, today):
         for offset in range(0, 367):
             target_date = today + datetime.timedelta(days=offset)
@@ -729,7 +902,7 @@ class ChronoGlass(QWidget):
     def update_ambition_display(self):
         target_time = self.get_ambition_target_time()
         seconds = QTime.currentTime().secsTo(target_time)
-        title = self.ambition_config.get("title", "生活的小确幸").strip() or "生活的小确幸"
+        title = self.ambition_config.get("title", "搬砖").strip() or "搬砖"
         subtitle = self.ambition_config.get("subtitle", "").strip()
         is_completed = seconds <= 0
 
@@ -752,28 +925,26 @@ class ChronoGlass(QWidget):
         if HAS_LUNAR:
             today = datetime.date.today()
             festival_name, festival_days = self.get_next_festival_info(today)
-            festival_display = self.truncate_display_text(festival_name, 4)
-            if festival_days is None:
-                badge_text = f"{festival_display}\n待定"
-            elif festival_days <= 0:
-                badge_text = f"{festival_display}\n今天"
-            else:
-                badge_text = f"{festival_display}\n{festival_days}天"
-            self.ambition_festival_label.setText(badge_text)
+            self.set_badge_display(
+                self.ambition_festival_label,
+                festival_name,
+                festival_days,
+                "节日",
+            )
 
             solar = Solar.fromYmd(today.year, today.month, today.day)
             jieqi_name, jieqi_days = self.get_next_jieqi_info(solar.getLunar(), today)
-            jieqi_display = self.truncate_display_text(jieqi_name, 4)
-            if jieqi_days is None:
-                jieqi_text = f"{jieqi_display}\n待定"
-            elif jieqi_days <= 0:
-                jieqi_text = f"{jieqi_display}\n今天"
-            else:
-                jieqi_text = f"{jieqi_display}\n{jieqi_days}天"
-            self.ambition_jieqi_label.setText(jieqi_text)
+            self.set_badge_display(
+                self.ambition_jieqi_label,
+                jieqi_name,
+                jieqi_days,
+                "节气",
+            )
         else:
             self.ambition_festival_label.setText("节日\n待启用")
+            self.ambition_festival_label.setToolTip("节日\n待启用")
             self.ambition_jieqi_label.setText("节气\n待启用")
+            self.ambition_jieqi_label.setToolTip("节气\n待启用")
 
         self.update_ambition_image(is_completed)
 
@@ -869,6 +1040,10 @@ class ChronoGlass(QWidget):
         self.refresh_display()
 
     def refresh_display(self):
+        self.content_stack.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            self.mode != AppMode.AMBITION,
+        )
         if self.mode == AppMode.CLOCK:
             self.content_stack.setCurrentWidget(self.text_page)
             time_str = QTime.currentTime().toString("HH:mm:ss")
@@ -884,7 +1059,7 @@ class ChronoGlass(QWidget):
         elif self.mode == AppMode.AMBITION:
             self.content_stack.setCurrentWidget(self.ambition_page)
             self.update_ambition_display()
-            self.update_style(PURPLE, "生活的小确幸")
+            self.update_style(PURPLE, "搬砖")
 
         elif self.mode == AppMode.COUNTDOWN:
             self.content_stack.setCurrentWidget(self.text_page)

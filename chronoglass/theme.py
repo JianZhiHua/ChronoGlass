@@ -189,6 +189,14 @@ QPushButton:pressed {
     background-color: #d8ebdf;
     border: 1px solid #5fbd82;
 }
+QToolTip {
+    background-color: #f7fbf6;
+    color: #34433f;
+    border: 1px solid #c9e8d6;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-family: 'Microsoft YaHei';
+}
 """
 
 
